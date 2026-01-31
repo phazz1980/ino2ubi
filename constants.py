@@ -3,7 +3,7 @@
 """
 
 # Версия приложения
-VERSION = "1.4"
+VERSION = "1.5"
 
 # GitHub-репозиторий для проверки обновлений (owner/repo)
 GITHUB_REPO = "phazz1980/ino2ubi"

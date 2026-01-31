@@ -5,6 +5,7 @@
 import json
 import os
 import re
+import ssl
 import sys
 import traceback
 import urllib.error
@@ -26,35 +27,47 @@ def _parse_version(v):
 
 
 class UpdateCheckerWorker(QtCore.QObject):
-    """Фоновый поток проверки обновлений на GitHub."""
+    """Фоновый поток проверки обновлений (urllib + ssl без проверки сертификата)."""
 
-    finished = QtCore.pyqtSignal(bool, str, str)  # has_update, latest_version, download_url
+    finished = QtCore.pyqtSignal(bool, str, str)
     error = QtCore.pyqtSignal(str)
 
     def run(self):
         try:
             api_url = "https://api.github.com/repos/{}/releases/latest".format(GITHUB_REPO)
             req = urllib.request.Request(api_url, headers={"User-Agent": "ino2ubi-updater/1.0"})
-            with urllib.request.urlopen(req, timeout=10) as r:
+            ctx = None
+            try:
+                if hasattr(ssl, "create_unverified_context"):
+                    ctx = ssl.create_unverified_context()
+                else:
+                    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS)
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+            except Exception:
+                ctx = None
+            with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
                 data = json.loads(r.read().decode())
             tag = data.get("tag_name", "")
             html_url = data.get("html_url", "https://github.com/{}/releases".format(GITHUB_REPO))
-            latest = tag.lstrip('v').strip() if tag else ""
+            latest = tag.lstrip("v").strip() if tag else ""
             if not latest:
                 self.error.emit("Не удалось получить версию из GitHub")
                 return
             if _parse_version(latest) > _parse_version(VERSION):
                 download_url = html_url
                 for a in data.get("assets", []):
-                    name = a.get("name", "")
-                    if name.endswith(".exe"):
+                    if a.get("name", "").endswith(".exe"):
                         download_url = a.get("browser_download_url", download_url)
                         break
                 self.finished.emit(True, latest, download_url)
             else:
                 self.finished.emit(False, latest, "")
-        except urllib.error.URLError as e:
-            self.error.emit("Нет доступа к интернету или GitHub недоступен: {}".format(e.reason))
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                self.error.emit("Релизы ещё не опубликованы на GitHub.\nСоздайте Release в репозитории.")
+            else:
+                self.error.emit("GitHub: HTTP {} — {}".format(e.code, e.reason))
         except Exception as e:
             self.error.emit(str(e))
 
@@ -87,18 +100,34 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
         self.create_widgets()
         # Автоматическая проверка обновлений при запуске (только exe)
         if getattr(sys, "frozen", False):
-            QtCore.QTimer.singleShot(1500, self._auto_check_updates)
+            QtCore.QTimer.singleShot(1500, lambda: self._start_update_check(silent=True))
 
-    def _auto_check_updates(self):
-        """Автоматическая проверка обновлений при запуске (тихо в фоне)."""
-        if not getattr(sys, "frozen", False):
+    def _start_update_check(self, silent=False):
+        """Запуск проверки обновлений в фоновом потоке (urllib + ssl без проверки сертификата)."""
+        if not getattr(sys, "frozen", False) and not silent:
+            QtWidgets.QMessageBox.information(
+                self, "Проверка обновлений",
+                "Проверка доступна только при запуске из exe-файла."
+            )
             return
+        if not silent:
+            self._update_progress = QtWidgets.QProgressDialog(
+                "Проверка обновлений...", None, 0, 0, self
+            )
+            self._update_progress.setWindowModality(QtCore.Qt.WindowModal)
+            self._update_progress.setWindowTitle("Обновления")
+            self._update_progress.show()
+            QtWidgets.QApplication.processEvents()
+
         worker = UpdateCheckerWorker()
         thread = QtCore.QThread()
         worker.moveToThread(thread)
-        self._auto_update_checker = (worker, thread)
+        self._update_checker = (worker, thread)
 
         def on_finished(has_update, latest_ver, download_url):
+            if getattr(self, "_update_progress", None):
+                self._update_progress.close()
+                self._update_progress = None
             thread.quit()
             if has_update:
                 msg = (
@@ -106,21 +135,30 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
                     "Текущая версия: {}\n\n"
                     "Открыть страницу загрузки?"
                 ).format(latest_ver, VERSION)
-                reply = QtWidgets.QMessageBox.question(
+                ans = QtWidgets.QMessageBox.question(
                     self, "Доступно обновление", msg,
                     QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
                     QtWidgets.QMessageBox.Yes
                 )
-                if reply == QtWidgets.QMessageBox.Yes and download_url:
+                if ans == QtWidgets.QMessageBox.Yes and download_url:
                     QtGui.QDesktopServices.openUrl(QtCore.QUrl(download_url))
+            elif not silent:
+                QtWidgets.QMessageBox.information(
+                    self, "Обновления", "Установлена актуальная версия ({}).".format(VERSION)
+                )
 
-        def on_error(_err_msg):
+        def on_error(err_msg):
+            if getattr(self, "_update_progress", None):
+                self._update_progress.close()
+                self._update_progress = None
             thread.quit()
+            if not silent:
+                QtWidgets.QMessageBox.warning(
+                    self, "Ошибка проверки обновлений",
+                    "Не удалось получить данные:\n{}".format(err_msg)
+                )
 
-        def do_check():
-            worker.run()
-
-        thread.started.connect(do_check)
+        thread.started.connect(worker.run)
         worker.finished.connect(on_finished)
         worker.error.connect(on_error)
         thread.start()
@@ -346,62 +384,7 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
 
     def check_for_updates(self):
         """Проверка обновлений exe на GitHub (только при запуске из exe)."""
-        if not getattr(sys, "frozen", False):
-            QtWidgets.QMessageBox.information(
-                self,
-                "Проверка обновлений",
-                "Проверка обновлений доступна только при запуске из exe-файла.\n\n"
-                "При запуске из Python используйте: pip install -U ... или git pull"
-            )
-            return
-        progress = QtWidgets.QProgressDialog("Проверка обновлений...", None, 0, 0, self)
-        progress.setWindowModality(QtCore.Qt.WindowModal)
-        progress.setWindowTitle("Обновления")
-        progress.show()
-        QtWidgets.QApplication.processEvents()
-
-        worker = UpdateCheckerWorker()
-        thread = QtCore.QThread()
-        worker.moveToThread(thread)
-        self._update_checker = (worker, thread)  # держим ссылку, чтобы не удалились
-
-        def on_finished(has_update, latest_ver, download_url):
-            progress.close()
-            if has_update:
-                msg = (
-                    "Доступна новая версия <b>{}</b>.\n\n"
-                    "Текущая версия: {}\n\n"
-                    "Открыть страницу загрузки?"
-                ).format(latest_ver, VERSION)
-                reply = QtWidgets.QMessageBox.question(
-                    self, "Доступно обновление", msg,
-                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                    QtWidgets.QMessageBox.Yes
-                )
-                if reply == QtWidgets.QMessageBox.Yes and download_url:
-                    QtGui.QDesktopServices.openUrl(QtCore.QUrl(download_url))
-            else:
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "Обновления",
-                    "Установлена актуальная версия ({}).".format(VERSION)
-                )
-            thread.quit()
-
-        def on_error(err_msg):
-            progress.close()
-            QtWidgets.QMessageBox.warning(
-                self, "Ошибка проверки обновлений", err_msg
-            )
-            thread.quit()
-
-        def do_check():
-            worker.run()
-
-        thread.started.connect(do_check)
-        worker.finished.connect(on_finished)
-        worker.error.connect(on_error)
-        thread.start()
+        self._start_update_check(silent=False)
 
     def clear_code(self):
         self.code_input.clear()

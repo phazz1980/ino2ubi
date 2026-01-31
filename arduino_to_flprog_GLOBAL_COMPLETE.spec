@@ -28,7 +28,7 @@ a = Analysis(
     hiddenimports=[
         'PyQt5.QtCore', 'PyQt5.QtGui', 'PyQt5.QtWidgets',
         'json', 'urllib.request', 'urllib.error', 'html', 'uuid', 'argparse',
-        're', 'traceback',
+        're', 'traceback', 'ssl',
     ],
     hookspath=[],
     hooksconfig={},

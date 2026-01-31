@@ -1,6 +1,6 @@
 # ino2ubi
 
-**Версия:** 1.4
+**Версия:** 1.5
 
 Скрипт для конвертации Arduino скетчей (.ino) в пользовательские блоки (.ubi) для программы FLProg. Позволяет автоматически создавать переиспользуемые блоки из Arduino кода с поддержкой входных/выходных параметров, переменных и пользовательских функций.
 
@@ -94,22 +94,39 @@ void loop() {
 
 | Файл | Назначение |
 |------|------------|
+| `launcher.py` | Launcher для exe (только при сборке) |
 | `arduino_to_flprog_GLOBAL_COMPLETE.py` | Точка входа (GUI/CLI) |
-| `constants.py` | Константы, маппинг типов |
+| `constants.py` | Константы, версия, маппинг типов |
 | `parser.py` | Парсинг Arduino кода |
 | `generator.py` | Генерация SIXX XML для FLProg |
 | `gui.py` | Графический интерфейс PyQt5 |
 | `README.md` | Документация и справка |
 | `CHANGELOG.md` | История изменений |
-| `commit_utf8.bat` | Скрипт для коммитов с русским текстом (UTF-8) |
+| `build_exe.bat` | Сборка exe (двойной клик) |
+
+## Проверка обновлений
+
+При запуске из exe приложение автоматически проверяет наличие новых версий на GitHub. Меню **Справка → Проверить обновления** — ручная проверка. Обновления не устанавливаются автоматически: пользователь скачивает релиз с [GitHub Releases](https://github.com/phazz1980/ino2ubi/releases) и заменяет файлы.
 
 ## Сборка EXE
 
+Запустите `build_exe.bat` (двойной клик) или:
 ```bash
-pyinstaller arduino_to_flprog_GLOBAL_COMPLETE.spec
+pyinstaller arduino_to_flprog_GLOBAL_COMPLETE.spec --noconfirm --distpath .
 ```
+Exe `ino2ubi.exe` и .py файлы — в корне проекта. Пересборка exe не нужна при изменении .py; достаточно заменить скрипты.
 
 ## История изменений (Changelog)
+
+### v1.5
+- Исправлена проверка обновлений: fallback SSL-контекста в exe на Windows (когда `create_unverified_context` недоступен)
+- Обработка 404: понятное сообщение при отсутствии релизов на GitHub
+
+### v1.4
+- **Launcher exe:** exe — только загрузчик; gui, parser, generator, constants — отдельные .py
+- **Проверка обновлений:** меню «Справка → Проверить обновления», авто-проверка при запуске (только exe)
+- Exe в корне проекта, имя `ino2ubi.exe` без версии
+- `build_exe.bat` с `cd /d "%~dp0"` для запуска двойным кликом
 
 ### v1.3
 - **Модульная структура:** код разделён на `arduino_to_flprog_GLOBAL_COMPLETE.py` (точка входа), `gui.py`, `generator.py`, `parser.py`, `constants.py`
