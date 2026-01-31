@@ -14,6 +14,10 @@ dist/
 *.egg-info/
 *.egg
 
+# Git temp
+.git-commit-msg.txt
+msg.txt
+
 # IDE
 .idea/
 .vscode/
