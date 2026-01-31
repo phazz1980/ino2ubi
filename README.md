@@ -100,9 +100,28 @@ void loop() {
 | `generator.py` | Генерация SIXX XML для FLProg |
 | `gui.py` | Графический интерфейс PyQt5 |
 | `README.md` | Документация и справка |
+| `commit_utf8.bat` | Скрипт для коммитов с русским текстом (UTF-8) |
 
 ## Сборка EXE
 
 ```bash
 pyinstaller arduino_to_flprog_GLOBAL_COMPLETE.spec
 ```
+
+## Коммиты с русским текстом (UTF-8)
+
+Чтобы сообщения коммитов корректно отображались на GitHub:
+
+1. **Рекомендуемый способ:** создайте файл `msg.txt` в UTF-8 с текстом коммита и выполните:
+   ```bash
+   git add -A
+   git commit -F msg.txt
+   git push
+   ```
+   Или используйте скрипт `commit_utf8.bat` (Windows).
+
+2. **Настройка Git** (опционально, один раз):
+   ```bash
+   git config i18n.commitEncoding utf-8
+   git config i18n.logOutputEncoding utf-8
+   ```
