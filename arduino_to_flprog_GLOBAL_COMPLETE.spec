@@ -4,10 +4,14 @@
 # Иконка окна: если icon.ico нет, в exe подставляется стандартная иконка Qt.
 
 import os
+import sys
 
 block_cipher = None
 
 _spec_dir = os.path.dirname(os.path.abspath(SPECPATH))
+sys.path.insert(0, _spec_dir)
+import constants
+_exe_name = 'ino2ubi_v{}'.format(constants.VERSION)
 _icon_path = os.path.join(_spec_dir, 'icon.ico')
 _readme_path = os.path.join(_spec_dir, 'README.md')
 _has_icon = os.path.isfile(_icon_path)
@@ -46,7 +50,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='ArduinoToFLProg',
+    name=_exe_name,
     icon=_icon_path if _has_icon else None,
     debug=False,
     bootloader_ignore_signals=False,

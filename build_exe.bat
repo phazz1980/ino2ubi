@@ -12,5 +12,5 @@ if errorlevel 1 (
     python -m PyInstaller arduino_to_flprog_GLOBAL_COMPLETE.spec --noconfirm
 )
 echo.
-echo Готово. exe: dist\ArduinoToFLProg.exe
+echo Готово. exe в dist\ino2ubi_v*.exe
 pause

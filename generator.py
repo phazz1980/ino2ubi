@@ -41,9 +41,12 @@ def create_ubi_xml_sixx(
     global_defines: dict,
     extra_declarations: list,
     setup_code: str,
-    loop_code: str
+    loop_code: str,
+    enable_input: bool = False
 ) -> str:
     """Создаёт SIXX XML для FLProg блока."""
+    if enable_input:
+        loop_code = "if(En)\n{\n" + loop_code + "\n}"
     loop_code_encoded = html.escape(loop_code)
     setup_code_encoded = html.escape(setup_code)
 
@@ -67,7 +70,29 @@ def create_ubi_xml_sixx(
     inputs_xml = ""
     inputs_list = [(var_name, var_info) for var_name, var_info in variables.items() if var_info['role'] == 'input']
 
-    id_base = 119328430
+    if enable_input:
+        en_adaptor_id = next_id()
+        en_obj_id = next_id()
+        en_id_source_id = next_id()
+        en_type_id = next_id()
+        en_name_id = next_id()
+        en_uuid_obj_id = next_id()
+        en_input_uuid = str(uuid.uuid4())
+        inputs_xml += '\t\t\t<sixx.object sixx.id="{}" sixx.type="InputsOutputsAdaptorForUserBlock" sixx.env="Arduino" >\n'.format(en_adaptor_id)
+        inputs_xml += '\t\t\t\t<sixx.object sixx.id="{}" sixx.name="object" sixx.type="UniversalBlockInputOutput" sixx.env="Arduino" >\n'.format(en_obj_id)
+        inputs_xml += '\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="id" sixx.type="SmallInteger" sixx.env="Core" >119328430</sixx.object>\n'.format(en_id_source_id)
+        inputs_xml += '\t\t\t\t\t<sixx.object sixx.name="block" sixx.idref="{}" />\n'.format(code_block_id)
+        inputs_xml += create_sixx_data_type('boolean', en_type_id, instance_coll_id, next_id)
+        inputs_xml += '\t\t\t\t\t<sixx.object sixx.name="isInput" sixx.type="True" sixx.env="Core" />\n'
+        inputs_xml += '\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="name" sixx.type="String" sixx.env="Core" >En</sixx.object>\n'.format(en_name_id)
+        inputs_xml += '\t\t\t\t\t<sixx.object sixx.name="isNot" sixx.type="False" sixx.env="Core" />\n'
+        inputs_xml += '\t\t\t\t\t<sixx.object sixx.name="nameCash" sixx.idref="{}" />\n'.format(en_name_id)
+        inputs_xml += '\t\t\t\t</sixx.object>\n'
+        inputs_xml += '\t\t\t\t<sixx.object sixx.name="comment" sixx.idref="{}" />\n'.format(comment_str_id)
+        inputs_xml += '\t\t\t\t<sixx.object sixx.id="{}" sixx.name="id" sixx.type="String" sixx.env="Core" >{}</sixx.object>\n'.format(en_uuid_obj_id, en_input_uuid)
+        inputs_xml += '\t\t\t</sixx.object>\n'
+
+    id_base = 119329430 if enable_input else 119328430
     for idx, (var_name, var_info) in enumerate(inputs_list):
         adaptor_id = next_id()
         obj_id = next_id()
@@ -223,9 +248,15 @@ def create_ubi_xml_sixx(
         decl_last_id = next_id()
         decl_first_id = next_id()
 
+        default_val = var_info.get('default')
+        if default_val:
+            last_part = " = {};".format(html.escape(default_val.strip()))
+        else:
+            last_part = ";"
+
         declare_xml += '\t\t\t\t\t<sixx.object sixx.id="{}" sixx.type="CodeUserBlockDeclareStandartBlock" sixx.env="Arduino" >\n'.format(decl_id)
         declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="name" sixx.type="String" sixx.env="Core" >{}</sixx.object>\n'.format(decl_name_id, var_info["alias"])
-        declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="lastPart" sixx.type="String" sixx.env="Core" >;</sixx.object>\n'.format(decl_last_id)
+        declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="lastPart" sixx.type="String" sixx.env="Core" >{}</sixx.object>\n'.format(decl_last_id, last_part)
         declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="firstPart" sixx.type="String" sixx.env="Core" >{}</sixx.object>\n'.format(decl_first_id, var_info["type"])
         declare_xml += '\t\t\t\t\t</sixx.object>\n'
 

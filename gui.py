@@ -14,6 +14,13 @@ from parser import parse_arduino_code, extract_function_body
 from generator import create_ubi_xml_sixx
 
 
+def _resource_dir():
+    """Каталог с ресурсами: при сборке exe — sys._MEIPASS, иначе — каталог gui.py."""
+    if getattr(sys, "frozen", False):
+        return getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
 class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
     """
     Главный класс приложения для конвертации Arduino кода в блоки FLProg.
@@ -21,7 +28,7 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("ino2ubi")
+        self.setWindowTitle("ino2ubi v{}".format(VERSION))
         self.resize(1400, 850)
         self._set_window_icon()
         self.variables = {}
@@ -156,6 +163,10 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
         self.block_description_entry.setFixedHeight(80)
         settings_layout.addWidget(self.block_description_entry, 1, 1)
 
+        self.enable_input_checkbox = QtWidgets.QCheckBox("Вход En (условие выполнения кода в Loop: if(En))")
+        self.enable_input_checkbox.setChecked(False)
+        settings_layout.addWidget(self.enable_input_checkbox, 2, 0, 1, 2)
+
         settings_group.setLayout(settings_layout)
         right_layout.addWidget(settings_group, 1)
 
@@ -193,14 +204,26 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
         self.code_input.selectAll()
 
     def _load_help_text(self):
-        """Загружает справку из README.md."""
-        base_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-        readme_path = os.path.join(base_dir, "README.md")
-        try:
-            with open(readme_path, "r", encoding="utf-8") as f:
-                return f.read()
-        except OSError:
-            return "Справка (README.md) не найдена."
+        """Загружает справку из README.md (в exe — из папки распаковки PyInstaller)."""
+        candidates = [
+            os.path.join(_resource_dir(), "README.md"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "README.md"),
+        ]
+        if getattr(sys, "frozen", False) and getattr(sys, "executable", None):
+            candidates.append(os.path.join(os.path.dirname(sys.executable), "README.md"))
+        for readme_path in candidates:
+            try:
+                with open(readme_path, "r", encoding="utf-8") as f:
+                    return f.read()
+            except OSError:
+                continue
+        return (
+            "# Справка — ino2ubi\n\n"
+            "Файл справки (README.md) не найден.\n\n"
+            "**Назначение:** конвертация Arduino скетчей (.ino) в пользовательские блоки (.ubi) для FLProg.\n\n"
+            "**Использование:** вставьте или загрузите код, задайте имя и описание блока, нажмите «Сгенерировать .ubi».\n\n"
+            "Полная документация — в файле README.md рядом с программой."
+        )
 
     def show_help(self):
         dialog = QtWidgets.QDialog(self)
@@ -485,7 +508,8 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
                 global_defines=self.global_defines,
                 extra_declarations=self.extra_declarations,
                 setup_code=setup_code,
-                loop_code=loop_code
+                loop_code=loop_code,
+                enable_input=self.enable_input_checkbox.isChecked()
             )
 
             if (self.last_save_dir and os.path.exists(self.last_save_dir) and
@@ -552,7 +576,8 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
                 global_defines=self.global_defines,
                 extra_declarations=self.extra_declarations,
                 setup_code=setup_code,
-                loop_code=loop_code
+                loop_code=loop_code,
+                enable_input=self.enable_input_checkbox.isChecked()
             )
 
             if not filename.endswith('.ubi'):

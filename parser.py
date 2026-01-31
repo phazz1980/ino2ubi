@@ -175,20 +175,185 @@ def parse_global_section(
         for (name, value) in re.findall(define_pattern, section, re.MULTILINE)
     }
 
-    # Парсим глобальные переменные
+    # Парсим глобальные переменные (поддержка множественных деклараций через запятую)
     variables = {}
     extra_declarations = []
-    var_pattern = r'\b(?:const\s+)?([A-Za-z_][A-Za-z0-9_:<>]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=\s*([^;]+))?;'
-    matches = re.finditer(var_pattern, section)
 
-    for match in matches:
-        full_decl = match.group(0).strip()
-        var_type = match.group(1).strip()
-        var_name = match.group(2)
-        var_value = match.group(3).strip() if match.group(3) else None
+    primitive_types = sorted(PRIMITIVE_TYPES, key=len, reverse=True)
+    primitive_type_patterns = [
+        re.sub(r'\s+', r'\\s+', re.escape(type_name)) for type_name in primitive_types
+    ]
+    primitive_type_regex = r'|'.join(primitive_type_patterns)
 
-        line_start = section.rfind('\n', 0, match.start()) + 1
-        line_end = section.find('\n', match.start())
+    def normalize_type(type_name: str) -> str:
+        return re.sub(r'\s+', ' ', type_name.strip())
+
+    def split_top_level(text: str, delimiter: str) -> list[str]:
+        parts = []
+        buf = []
+        paren = bracket = brace = 0
+        in_string = False
+        string_char = ''
+        escape = False
+        for ch in text:
+            if in_string:
+                buf.append(ch)
+                if escape:
+                    escape = False
+                elif ch == '\\':
+                    escape = True
+                elif ch == string_char:
+                    in_string = False
+                continue
+            if ch in ('"', "'"):
+                in_string = True
+                string_char = ch
+                buf.append(ch)
+                continue
+            if ch == '(':
+                paren += 1
+            elif ch == ')':
+                paren = max(paren - 1, 0)
+            elif ch == '[':
+                bracket += 1
+            elif ch == ']':
+                bracket = max(bracket - 1, 0)
+            elif ch == '{':
+                brace += 1
+            elif ch == '}':
+                brace = max(brace - 1, 0)
+            if (
+                ch == delimiter
+                and paren == 0
+                and bracket == 0
+                and brace == 0
+            ):
+                part = ''.join(buf).strip()
+                if part:
+                    parts.append(part)
+                buf = []
+            else:
+                buf.append(ch)
+        tail = ''.join(buf).strip()
+        if tail:
+            parts.append(tail)
+        return parts
+
+    def split_initializer(decl: str) -> tuple[str, str | None]:
+        paren = bracket = brace = 0
+        in_string = False
+        string_char = ''
+        escape = False
+        for idx, ch in enumerate(decl):
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == '\\':
+                    escape = True
+                elif ch == string_char:
+                    in_string = False
+                continue
+            if ch in ('"', "'"):
+                in_string = True
+                string_char = ch
+                continue
+            if ch == '(':
+                paren += 1
+            elif ch == ')':
+                paren = max(paren - 1, 0)
+            elif ch == '[':
+                bracket += 1
+            elif ch == ']':
+                bracket = max(bracket - 1, 0)
+            elif ch == '{':
+                brace += 1
+            elif ch == '}':
+                brace = max(brace - 1, 0)
+            if (
+                ch == '='
+                and paren == 0
+                and bracket == 0
+                and brace == 0
+            ):
+                name_part = decl[:idx].strip()
+                value_part = decl[idx + 1:].strip()
+                return name_part, value_part or None
+        return decl.strip(), None
+
+    def extract_name(name_part: str) -> str | None:
+        match = re.findall(r'[A-Za-z_][A-Za-z0-9_]*', name_part)
+        return match[-1] if match else None
+
+    def split_statements(text: str) -> list[tuple[str, int]]:
+        statements = []
+        buf = []
+        paren = bracket = brace = 0
+        in_string = False
+        string_char = ''
+        escape = False
+        start_idx = 0
+        for idx, ch in enumerate(text):
+            if in_string:
+                buf.append(ch)
+                if escape:
+                    escape = False
+                elif ch == '\\':
+                    escape = True
+                elif ch == string_char:
+                    in_string = False
+                continue
+            if ch in ('"', "'"):
+                in_string = True
+                string_char = ch
+                buf.append(ch)
+                continue
+            if ch == '(':
+                paren += 1
+            elif ch == ')':
+                paren = max(paren - 1, 0)
+            elif ch == '[':
+                bracket += 1
+            elif ch == ']':
+                bracket = max(bracket - 1, 0)
+            elif ch == '{':
+                brace += 1
+            elif ch == '}':
+                brace = max(brace - 1, 0)
+            if ch == ';' and paren == 0 and bracket == 0 and brace == 0:
+                statement = ''.join(buf).strip()
+                if statement:
+                    statements.append((statement, start_idx))
+                buf = []
+                start_idx = idx + 1
+            else:
+                buf.append(ch)
+        return statements
+
+    def mask_directives(text: str) -> str:
+        def repl(match: re.Match) -> str:
+            return ' ' * (match.end() - match.start())
+        return re.sub(r'^[ \t]*#.*$', repl, text, flags=re.MULTILINE)
+
+    def mask_comments(text: str) -> str:
+        def repl(match: re.Match) -> str:
+            return ' ' * (match.end() - match.start())
+        text = re.sub(r'/\*.*?\*/', repl, text, flags=re.DOTALL)
+        text = re.sub(r'//[^\n]*', repl, text)
+        return text
+
+    masked_section = mask_comments(mask_directives(section))
+
+    for statement, start_idx in split_statements(masked_section):
+        stmt = statement.strip()
+        if not stmt or stmt.startswith('#'):
+            continue
+
+        # Исключаем прототипы функций
+        if re.search(r'\w+\s*\([^)]*\)\s*$', stmt) and '=' not in stmt:
+            continue
+
+        line_start = section.rfind('\n', 0, start_idx) + 1
+        line_end = section.find('\n', start_idx)
         if line_end == -1:
             line_end = len(section)
         line_text = section[line_start:line_end]
@@ -201,15 +366,33 @@ def parse_global_section(
         elif re.search(r'//\s*par\b', line_text):
             role = 'parameter'
 
-        if var_type in PRIMITIVE_TYPES:
-            variables[var_name] = {
-                'type': var_type,
-                'default': var_value,
-                'role': role,
-                'alias': var_name
-            }
-        else:
-            extra_declarations.append(full_decl)
+        # Убираем базовые квалификаторы хранения
+        stmt_no_qual = re.sub(r'^\s*(?:(?:static|const|volatile)\s+)+', '', stmt)
+
+        primitive_match = re.match(
+            r'^(?P<type>{})\b\s+(?P<decls>.+)$'.format(primitive_type_regex),
+            stmt_no_qual
+        )
+
+        if primitive_match:
+            var_type = normalize_type(primitive_match.group('type'))
+            decls = primitive_match.group('decls').strip()
+            for decl in split_top_level(decls, ','):
+                name_part, value_part = split_initializer(decl)
+                var_name = extract_name(name_part)
+                if not var_name:
+                    continue
+                variables[var_name] = {
+                    'type': var_type,
+                    'default': value_part,
+                    'role': role,
+                    'alias': var_name
+                }
+            continue
+
+        # Остальные декларации сохраняем как есть
+        if re.match(r'^[A-Za-z_][A-Za-z0-9_:<>]*\s+.+$', stmt):
+            extra_declarations.append(stmt + ';')
 
     return variables, global_includes, global_defines, extra_declarations
 
