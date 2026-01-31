@@ -3,7 +3,10 @@
 """
 
 # Версия приложения
-VERSION = "1.3"
+VERSION = "1.4"
+
+# GitHub-репозиторий для проверки обновлений (owner/repo)
+GITHUB_REPO = "phazz1980/ino2ubi"
 
 # Примитивные типы Arduino, отображаемые в таблице переменных
 PRIMITIVE_TYPES = {

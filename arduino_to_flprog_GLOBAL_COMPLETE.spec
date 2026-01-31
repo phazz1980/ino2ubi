@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 # Сборка: pyinstaller arduino_to_flprog_GLOBAL_COMPLETE.spec
-# Иконка exe: положите icon.ico в ту же папку, что и этот .spec файл, перед сборкой.
-# Иконка окна: если icon.ico нет, в exe подставляется стандартная иконка Qt.
+# exe = launcher, остальное (gui, parser, generator, constants) — скрипты рядом с exe.
+# Иконка: icon.ico в папке .spec перед сборкой.
 
 import os
 import sys
@@ -9,9 +9,7 @@ import sys
 block_cipher = None
 
 _spec_dir = os.path.dirname(os.path.abspath(SPECPATH))
-sys.path.insert(0, _spec_dir)
-import constants
-_exe_name = 'ino2ubi_v{}'.format(constants.VERSION)
+_exe_name = 'ino2ubi'
 _icon_path = os.path.join(_spec_dir, 'icon.ico')
 _readme_path = os.path.join(_spec_dir, 'README.md')
 _has_icon = os.path.isfile(_icon_path)
@@ -23,18 +21,19 @@ if os.path.isfile(_readme_path):
     _datas.append((_readme_path, '.'))
 
 a = Analysis(
-    ['arduino_to_flprog_GLOBAL_COMPLETE.py'],
+    ['launcher.py'],
     pathex=[],
     binaries=[],
     datas=_datas,
     hiddenimports=[
         'PyQt5.QtCore', 'PyQt5.QtGui', 'PyQt5.QtWidgets',
-        'constants', 'parser', 'generator', 'gui'
+        'json', 'urllib.request', 'urllib.error', 'html', 'uuid', 'argparse',
+        're', 'traceback',
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['gui', 'generator', 'parser', 'constants'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -58,7 +57,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,  # Без консоли (GUI)
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

@@ -6,6 +6,7 @@ ino2ubi — Конвертер Arduino скетчей (.ino) в блоки FLPro
 Точка входа приложения. Поддерживает GUI и CLI режимы.
 
 Структура проекта:
+    launcher.py                           — launcher для exe (только при сборке)
     arduino_to_flprog_GLOBAL_COMPLETE.py  — точка входа (GUI/CLI)
     gui.py                                — графический интерфейс PyQt5
     generator.py                          — генерация SIXX XML для FLProg
