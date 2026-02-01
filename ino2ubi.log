@@ -71,3 +71,20 @@
 2026-02-01 22:26:03,238 INFO [gui] load_arduino_file: loaded C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ino
 2026-02-01 22:26:05,306 DEBUG [gui] load_arduino_file: opening dialog start_dir=C:\Users\fotne\YandexDisk\Flprog\newWork
 2026-02-01 22:26:06,574 DEBUG [gui] load_arduino_file: dialog returned filename=
+2026-02-01 23:11:26,880 INFO [__main__] main_cli: start, input=None
+2026-02-01 23:11:26,880 DEBUG [__main__] main_cli: GUI mode
+2026-02-01 23:11:26,896 DEBUG [__main__] main_cli: creating window
+2026-02-01 23:11:26,896 DEBUG [gui] ArduinoToFLProgConverter.__init__: start
+2026-02-01 23:11:26,909 DEBUG [gui] ArduinoToFLProgConverter.__init__: create_widgets
+2026-02-01 23:11:27,246 DEBUG [gui] ArduinoToFLProgConverter.__init__: done, frozen=True
+2026-02-01 23:11:27,247 DEBUG [__main__] main_cli: showing window, entering event loop
+2026-02-01 23:11:27,303 INFO [gui] _start_update_check: silent=True
+2026-02-01 23:11:27,357 DEBUG [gui] _start_update_check: progress shown, starting thread
+2026-02-01 23:11:27,357 DEBUG [gui] UpdateCheckerWorker.run: start
+2026-02-01 23:11:27,831 DEBUG [gui] UpdateCheckerWorker.run: no update latest=1.6
+2026-02-01 23:11:27,832 INFO [gui] update_check on_finished: has_update=False latest_ver=1.6
+2026-02-01 23:11:30,208 INFO [gui] _start_update_check: silent=False
+2026-02-01 23:11:30,218 DEBUG [gui] _start_update_check: progress shown, starting thread
+2026-02-01 23:11:30,219 DEBUG [gui] UpdateCheckerWorker.run: start
+2026-02-01 23:11:30,492 DEBUG [gui] UpdateCheckerWorker.run: no update latest=1.6
+2026-02-01 23:11:30,493 INFO [gui] update_check on_finished: has_update=False latest_ver=1.6

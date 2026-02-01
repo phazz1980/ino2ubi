@@ -61,9 +61,15 @@ class UpdateCheckerWorker(QtCore.QObject):
             if _parse_version(latest) > _parse_version(VERSION):
                 download_url = html_url
                 for a in data.get("assets", []):
-                    if a.get("name", "").endswith(".exe"):
+                    name = a.get("name", "")
+                    if name.endswith(".zip"):
                         download_url = a.get("browser_download_url", download_url)
                         break
+                else:
+                    for a in data.get("assets", []):
+                        if a.get("name", "").endswith(".exe"):
+                            download_url = a.get("browser_download_url", download_url)
+                            break
                 log.debug("UpdateCheckerWorker.run: has_update=True latest=%s", latest)
                 self.finished.emit(True, latest, download_url)
             else:
@@ -151,7 +157,7 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
                 msg = (
                     "Доступна новая версия <b>{}</b>.\n\n"
                     "Текущая версия: {}\n\n"
-                    "Открыть страницу загрузки?"
+                    "Открыть загрузку (zip)?"
                 ).format(latest_ver, VERSION)
                 ans = QtWidgets.QMessageBox.question(
                     self, "Доступно обновление", msg,
