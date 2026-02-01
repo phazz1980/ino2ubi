@@ -156,7 +156,7 @@ def parse_global_section(
 ) -> tuple[dict, list, dict, list]:
     """
     Парсит глобальную секцию кода.
-    Возвращает: (variables, global_includes, global_defines, extra_declarations)
+    Возвращает: (variables, global_includes, global_defines, extra_declarations, parameter_defines)
     """
     # Убираем функции, определённые до setup/loop
     section = global_section
@@ -169,11 +169,22 @@ def parse_global_section(
     include_pattern = r'^\s*#include[^\n]*$'
     global_includes = re.findall(include_pattern, section, re.MULTILINE)
 
-    define_pattern = r'^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)\s+(.+)$'
-    global_defines = {
-        name: value.strip()
-        for (name, value) in re.findall(define_pattern, section, re.MULTILINE)
-    }
+    global_defines = {}
+    parameter_defines = []
+    for line in section.split('\n'):
+        stripped = line.strip()
+        if not stripped.startswith('#define'):
+            continue
+        m = re.match(r'#define\s+([A-Za-z_][A-Za-z0-9_]*)\s+(.*)$', stripped)
+        if not m:
+            continue
+        name, rest = m.group(1), m.group(2)
+        is_par = bool(re.search(r'//\s*par\b', rest))
+        value = rest.split('//')[0].strip() if '//' in rest else rest.strip()
+        if is_par:
+            parameter_defines.append({'name': name, 'value': value})
+        else:
+            global_defines[name] = value
 
     # Парсим глобальные переменные (поддержка множественных деклараций через запятую)
     variables = {}
@@ -390,11 +401,11 @@ def parse_global_section(
                 }
             continue
 
-        # Остальные декларации сохраняем как есть
-        if re.match(r'^[A-Za-z_][A-Za-z0-9_:<>]*\s+.+$', stmt):
+        # Остальные декларации сохраняем как есть (в т.ч. многострочные typedef struct/enum)
+        if re.match(r'^[A-Za-z_][A-Za-z0-9_:<>]*\s+.+$', stmt, re.DOTALL):
             extra_declarations.append(stmt + ';')
 
-    return variables, global_includes, global_defines, extra_declarations
+    return variables, global_includes, global_defines, extra_declarations, parameter_defines
 
 
 def parse_arduino_code(code: str) -> dict:
@@ -413,7 +424,7 @@ def parse_arduino_code(code: str) -> dict:
     functions = parse_functions(code)
     global_section_raw = extract_global_section(code)
 
-    variables, global_includes, global_defines, extra_declarations = parse_global_section(
+    variables, global_includes, global_defines, extra_declarations, parameter_defines = parse_global_section(
         global_section_raw, functions
     )
 
@@ -425,4 +436,5 @@ def parse_arduino_code(code: str) -> dict:
         'global_includes': global_includes,
         'global_defines': global_defines,
         'extra_declarations': extra_declarations,
+        'parameter_defines': parameter_defines,
     }

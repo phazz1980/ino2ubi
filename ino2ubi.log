@@ -1,0 +1,73 @@
+2026-02-01 22:21:06,902 INFO [__main__] main_cli: start, input=None
+2026-02-01 22:21:06,903 DEBUG [__main__] main_cli: GUI mode
+2026-02-01 22:21:06,920 DEBUG [__main__] main_cli: creating window
+2026-02-01 22:21:06,921 DEBUG [gui] ArduinoToFLProgConverter.__init__: start
+2026-02-01 22:21:06,934 DEBUG [gui] ArduinoToFLProgConverter.__init__: create_widgets
+2026-02-01 22:21:07,231 DEBUG [gui] ArduinoToFLProgConverter.__init__: done, frozen=True
+2026-02-01 22:21:07,232 DEBUG [__main__] main_cli: showing window, entering event loop
+2026-02-01 22:21:07,289 INFO [gui] _start_update_check: silent=True
+2026-02-01 22:21:07,343 DEBUG [gui] _start_update_check: progress shown, starting thread
+2026-02-01 22:21:07,343 DEBUG [gui] UpdateCheckerWorker.run: start
+2026-02-01 22:21:07,824 DEBUG [gui] UpdateCheckerWorker.run: no update latest=1.5
+2026-02-01 22:21:07,825 INFO [gui] update_check on_finished: has_update=False latest_ver=1.5
+2026-02-01 22:21:10,482 DEBUG [gui] load_arduino_file: opening dialog start_dir=C:\Users\fotne\YandexDisk\Flprog\newWork
+2026-02-01 22:21:11,727 DEBUG [gui] load_arduino_file: dialog returned filename=C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ino
+2026-02-01 22:21:11,730 INFO [gui] load_arduino_file: loaded C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ino
+2026-02-01 22:21:16,834 INFO [__main__] main_cli: start, input=None
+2026-02-01 22:21:16,834 DEBUG [__main__] main_cli: GUI mode
+2026-02-01 22:21:16,850 DEBUG [__main__] main_cli: creating window
+2026-02-01 22:21:16,851 DEBUG [gui] ArduinoToFLProgConverter.__init__: start
+2026-02-01 22:21:16,864 DEBUG [gui] ArduinoToFLProgConverter.__init__: create_widgets
+2026-02-01 22:21:17,165 DEBUG [gui] ArduinoToFLProgConverter.__init__: done, frozen=True
+2026-02-01 22:21:17,165 DEBUG [__main__] main_cli: showing window, entering event loop
+2026-02-01 22:21:17,221 INFO [gui] _start_update_check: silent=True
+2026-02-01 22:21:17,271 DEBUG [gui] _start_update_check: progress shown, starting thread
+2026-02-01 22:21:17,272 DEBUG [gui] UpdateCheckerWorker.run: start
+2026-02-01 22:21:17,581 DEBUG [gui] UpdateCheckerWorker.run: no update latest=1.5
+2026-02-01 22:21:17,582 INFO [gui] update_check on_finished: has_update=False latest_ver=1.5
+2026-02-01 22:21:18,665 DEBUG [gui] load_arduino_file: opening dialog start_dir=C:\Users\fotne\YandexDisk\Flprog\newWork
+2026-02-01 22:23:06,917 INFO [__main__] main_cli: start, input=None
+2026-02-01 22:23:06,917 DEBUG [__main__] main_cli: GUI mode
+2026-02-01 22:23:06,935 DEBUG [__main__] main_cli: creating window
+2026-02-01 22:23:06,935 DEBUG [gui] ArduinoToFLProgConverter.__init__: start
+2026-02-01 22:23:06,948 DEBUG [gui] ArduinoToFLProgConverter.__init__: create_widgets
+2026-02-01 22:23:07,255 DEBUG [gui] ArduinoToFLProgConverter.__init__: done, frozen=True
+2026-02-01 22:23:07,256 DEBUG [__main__] main_cli: showing window, entering event loop
+2026-02-01 22:23:07,313 INFO [gui] _start_update_check: silent=True
+2026-02-01 22:23:07,364 DEBUG [gui] _start_update_check: progress shown, starting thread
+2026-02-01 22:23:07,364 DEBUG [gui] UpdateCheckerWorker.run: start
+2026-02-01 22:23:07,844 DEBUG [gui] UpdateCheckerWorker.run: no update latest=1.5
+2026-02-01 22:23:07,844 INFO [gui] update_check on_finished: has_update=False latest_ver=1.5
+2026-02-01 22:23:09,455 DEBUG [gui] load_arduino_file: opening dialog start_dir=C:\Users\fotne\YandexDisk\Flprog\newWork
+2026-02-01 22:23:16,236 INFO [__main__] main_cli: start, input=None
+2026-02-01 22:23:16,237 DEBUG [__main__] main_cli: GUI mode
+2026-02-01 22:23:16,252 DEBUG [__main__] main_cli: creating window
+2026-02-01 22:23:16,252 DEBUG [gui] ArduinoToFLProgConverter.__init__: start
+2026-02-01 22:23:16,265 DEBUG [gui] ArduinoToFLProgConverter.__init__: create_widgets
+2026-02-01 22:23:16,559 DEBUG [gui] ArduinoToFLProgConverter.__init__: done, frozen=True
+2026-02-01 22:23:16,560 DEBUG [__main__] main_cli: showing window, entering event loop
+2026-02-01 22:23:16,615 INFO [gui] _start_update_check: silent=True
+2026-02-01 22:23:16,664 DEBUG [gui] _start_update_check: progress shown, starting thread
+2026-02-01 22:23:16,664 DEBUG [gui] UpdateCheckerWorker.run: start
+2026-02-01 22:23:17,014 DEBUG [gui] UpdateCheckerWorker.run: no update latest=1.5
+2026-02-01 22:23:17,015 INFO [gui] update_check on_finished: has_update=False latest_ver=1.5
+2026-02-01 22:23:18,454 DEBUG [gui] load_arduino_file: opening dialog start_dir=C:\Users\fotne\YandexDisk\Flprog\newWork
+2026-02-01 22:23:20,041 DEBUG [gui] load_arduino_file: dialog returned filename=C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ino
+2026-02-01 22:23:20,043 INFO [gui] load_arduino_file: loaded C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ino
+2026-02-01 22:25:49,189 INFO [__main__] main_cli: start, input=None
+2026-02-01 22:25:49,189 DEBUG [__main__] main_cli: GUI mode
+2026-02-01 22:25:49,206 DEBUG [__main__] main_cli: creating window
+2026-02-01 22:25:49,207 DEBUG [gui] ArduinoToFLProgConverter.__init__: start
+2026-02-01 22:25:49,222 DEBUG [gui] ArduinoToFLProgConverter.__init__: create_widgets
+2026-02-01 22:25:49,529 DEBUG [gui] ArduinoToFLProgConverter.__init__: done, frozen=True
+2026-02-01 22:25:49,529 DEBUG [__main__] main_cli: showing window, entering event loop
+2026-02-01 22:25:49,603 INFO [gui] _start_update_check: silent=True
+2026-02-01 22:25:49,662 DEBUG [gui] _start_update_check: progress shown, starting thread
+2026-02-01 22:25:49,664 DEBUG [gui] UpdateCheckerWorker.run: start
+2026-02-01 22:25:50,117 DEBUG [gui] UpdateCheckerWorker.run: no update latest=1.5
+2026-02-01 22:25:50,118 INFO [gui] update_check on_finished: has_update=False latest_ver=1.5
+2026-02-01 22:25:59,928 DEBUG [gui] load_arduino_file: opening dialog start_dir=C:\Users\fotne\YandexDisk\Flprog\newWork
+2026-02-01 22:26:03,235 DEBUG [gui] load_arduino_file: dialog returned filename=C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ino
+2026-02-01 22:26:03,238 INFO [gui] load_arduino_file: loaded C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ino
+2026-02-01 22:26:05,306 DEBUG [gui] load_arduino_file: opening dialog start_dir=C:\Users\fotne\YandexDisk\Flprog\newWork
+2026-02-01 22:26:06,574 DEBUG [gui] load_arduino_file: dialog returned filename=

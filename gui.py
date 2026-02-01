@@ -3,6 +3,7 @@
 """
 
 import json
+import logging
 import os
 import re
 import ssl
@@ -14,6 +15,8 @@ import urllib.request
 from PyQt5 import QtWidgets, QtCore, QtGui
 
 from constants import VERSION, GITHUB_REPO
+
+log = logging.getLogger(__name__)
 from parser import parse_arduino_code, extract_function_body
 from generator import create_ubi_xml_sixx
 
@@ -33,6 +36,7 @@ class UpdateCheckerWorker(QtCore.QObject):
     error = QtCore.pyqtSignal(str)
 
     def run(self):
+        log.debug("UpdateCheckerWorker.run: start")
         try:
             api_url = "https://api.github.com/repos/{}/releases/latest".format(GITHUB_REPO)
             req = urllib.request.Request(api_url, headers={"User-Agent": "ino2ubi-updater/1.0"})
@@ -60,15 +64,19 @@ class UpdateCheckerWorker(QtCore.QObject):
                     if a.get("name", "").endswith(".exe"):
                         download_url = a.get("browser_download_url", download_url)
                         break
+                log.debug("UpdateCheckerWorker.run: has_update=True latest=%s", latest)
                 self.finished.emit(True, latest, download_url)
             else:
+                log.debug("UpdateCheckerWorker.run: no update latest=%s", latest)
                 self.finished.emit(False, latest, "")
         except urllib.error.HTTPError as e:
+            log.warning("UpdateCheckerWorker.run: HTTPError %s", e)
             if e.code == 404:
                 self.error.emit("Релизы ещё не опубликованы на GitHub.\nСоздайте Release в репозитории.")
             else:
                 self.error.emit("GitHub: HTTP {} — {}".format(e.code, e.reason))
         except Exception as e:
+            log.exception("UpdateCheckerWorker.run: exception %s", e)
             self.error.emit(str(e))
 
 
@@ -85,6 +93,7 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
     """
 
     def __init__(self):
+        log.debug("ArduinoToFLProgConverter.__init__: start")
         super().__init__()
         self.setWindowTitle("ino2ubi v{}".format(VERSION))
         self.resize(1400, 850)
@@ -94,30 +103,38 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
         self.global_section_raw = ""
         self.global_includes = []
         self.global_defines = {}
+        self.parameter_defines = []
+        self.global_defines_use_as_param = set()  # имена глобальных #define, используемых как параметры блока
         self.extra_declarations = []
         self._safe_home = self._get_safe_home_dir()
-        self.last_save_dir = self._safe_home
+        app_dir = self._app_dir()
+        self.last_save_dir = app_dir if (app_dir and os.path.isdir(app_dir)) else self._safe_home
+        log.debug("ArduinoToFLProgConverter.__init__: create_widgets")
         self.create_widgets()
-        # Автоматическая проверка обновлений при запуске (только exe)
+        log.debug("ArduinoToFLProgConverter.__init__: done, frozen=%s", getattr(sys, "frozen", False))
+        # Автоматическая проверка обновлений при запуске (только exe). GUI блокируется на время проверки.
         if getattr(sys, "frozen", False):
-            QtCore.QTimer.singleShot(1500, lambda: self._start_update_check(silent=True))
+            QtCore.QTimer.singleShot(0, lambda: self._start_update_check(silent=True))
 
     def _start_update_check(self, silent=False):
         """Запуск проверки обновлений в фоновом потоке (urllib + ssl без проверки сертификата)."""
+        log.info("_start_update_check: silent=%s", silent)
         if not getattr(sys, "frozen", False) and not silent:
             QtWidgets.QMessageBox.information(
                 self, "Проверка обновлений",
                 "Проверка доступна только при запуске из exe-файла."
             )
             return
-        if not silent:
-            self._update_progress = QtWidgets.QProgressDialog(
-                "Проверка обновлений...", None, 0, 0, self
-            )
-            self._update_progress.setWindowModality(QtCore.Qt.WindowModal)
-            self._update_progress.setWindowTitle("Обновления")
-            self._update_progress.show()
-            QtWidgets.QApplication.processEvents()
+        # Всегда показываем модальное окно на время проверки — блокируем GUI, чтобы не было вылетов при выборе файла.
+        self._update_progress = QtWidgets.QProgressDialog(
+            "Проверка обновлений...", None, 0, 0, self
+        )
+        self._update_progress.setWindowModality(QtCore.Qt.WindowModal)
+        self._update_progress.setWindowTitle("Обновления")
+        self._update_progress.setCancelButton(None)
+        self._update_progress.show()
+        QtWidgets.QApplication.processEvents()
+        log.debug("_start_update_check: progress shown, starting thread")
 
         worker = UpdateCheckerWorker()
         thread = QtCore.QThread()
@@ -125,6 +142,7 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
         self._update_checker = (worker, thread)
 
         def on_finished(has_update, latest_ver, download_url):
+            log.info("update_check on_finished: has_update=%s latest_ver=%s", has_update, latest_ver)
             if getattr(self, "_update_progress", None):
                 self._update_progress.close()
                 self._update_progress = None
@@ -148,6 +166,7 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
                 )
 
         def on_error(err_msg):
+            log.warning("update_check on_error: %s", err_msg)
             if getattr(self, "_update_progress", None):
                 self._update_progress.close()
                 self._update_progress = None
@@ -162,6 +181,12 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
         worker.finished.connect(on_finished)
         worker.error.connect(on_error)
         thread.start()
+
+    def _app_dir(self):
+        """Папка, в которой находится ino2ubi (exe или скрипты)."""
+        if getattr(sys, "frozen", False):
+            return os.path.dirname(os.path.abspath(sys.executable))
+        return os.path.dirname(os.path.abspath(__file__))
 
     def _get_safe_home_dir(self):
         """Начальная папка для диалогов: никогда не system32."""
@@ -391,20 +416,27 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
 
     def load_arduino_file(self):
         start_dir = self.last_save_dir if os.path.isdir(self.last_save_dir) else self._safe_home
+        log.debug("load_arduino_file: opening dialog start_dir=%s", start_dir)
+        # DontUseNativeDialog — избегаем падений нативного диалога Windows в папках Yandex.Disk и др.
         filename, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Выберите Arduino файл", start_dir, "Arduino files (*.ino);;All files (*.*)"
+            self, "Выберите Arduino файл", start_dir, "Arduino files (*.ino);;All files (*.*)",
+            options=QtWidgets.QFileDialog.DontUseNativeDialog
         )
+        log.debug("load_arduino_file: dialog returned filename=%s", filename)
         if filename:
             try:
                 with open(filename, 'r', encoding='utf-8') as f:
                     self.code_input.setPlainText(f.read())
                 base_name = os.path.splitext(os.path.basename(filename))[0]
                 self.block_name_entry.setText(base_name)
+                log.info("load_arduino_file: loaded %s", filename)
             except Exception as e:
+                log.exception("load_arduino_file: error %s", e)
                 QtWidgets.QMessageBox.critical(self, "Ошибка", "Не удалось загрузить файл: {}".format(e))
 
     def parse_code(self):
         """Парсит Arduino код и обновляет таблицы."""
+        log.debug("parse_code: start")
         code = self.code_input.toPlainText()
         self.var_tree.clear()
         self.variables = {}
@@ -413,9 +445,12 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
         self.global_section_raw = ""
         self.global_includes = []
         self.global_defines = {}
+        self.parameter_defines = []
+        self.global_defines_use_as_param = set()
         self.extra_declarations = []
 
         result = parse_arduino_code(code)
+        log.debug("parse_code: parse_arduino_code done")
 
         if result['leading_comment']:
             self.block_description_entry.setPlainText(result['leading_comment'])
@@ -425,6 +460,7 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
         self.global_section_raw = result['global_section_raw']
         self.global_includes = result['global_includes']
         self.global_defines = result['global_defines']
+        self.parameter_defines = result.get('parameter_defines', [])
         self.extra_declarations = result['extra_declarations']
 
         for func_name, func_info in self.functions.items():
@@ -440,14 +476,32 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
             ])
             self.var_tree.addTopLevelItem(item)
 
+        for pd in self.parameter_defines:
+            name = pd.get('name', '')
+            value = pd.get('value', '')
+            item = QtWidgets.QTreeWidgetItem([
+                name, "define", "parameter", name, value
+            ])
+            item.setData(0, QtCore.Qt.UserRole, "define")
+            self.var_tree.addTopLevelItem(item)
+
+        for name, value in self.global_defines.items():
+            role = "parameter" if name in self.global_defines_use_as_param else "global"
+            item = QtWidgets.QTreeWidgetItem([
+                name, "define", role, name, value
+            ])
+            item.setData(0, QtCore.Qt.UserRole, "global_define")
+            self.var_tree.addTopLevelItem(item)
+
         QtWidgets.QMessageBox.information(
             self,
             "Парсинг",
-            "Найдено глобальных переменных: {}\nНайдено функций: {}\nНайдено #include: {}\nНайдено #define: {}".format(
+            "Найдено глобальных переменных: {}\nНайдено функций: {}\nНайдено #include: {}\nНайдено #define: {}\n#define в параметрах: {}".format(
                 len(self.variables),
                 len(self.functions),
                 len(self.global_includes),
                 len(self.global_defines),
+                len(self.parameter_defines),
             ),
         )
 
@@ -483,9 +537,146 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
         dialog.setLayout(layout)
         dialog.exec_()
 
+    def _edit_global_define(self, item, define_name):
+        """Открывает диалог редактирования глобального #define."""
+        if define_name not in self.global_defines:
+            return
+        old_value = self.global_defines[define_name]
+
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Редактировать #define: {}".format(define_name))
+        dialog.resize(450, 200)
+
+        layout = QtWidgets.QFormLayout()
+
+        name_edit = QtWidgets.QLineEdit(define_name)
+        name_edit.setPlaceholderText("Имя макроса")
+        name_edit.setToolTip("Имя для #define (буквы, цифры, подчёркивание)")
+        layout.addRow("Имя (#define):", name_edit)
+
+        value_edit = QtWidgets.QLineEdit(old_value)
+        value_edit.setPlaceholderText("Значение")
+        value_edit.setToolTip("Значение макроса")
+        layout.addRow("Значение:", value_edit)
+
+        use_in_params_check = QtWidgets.QCheckBox("Использовать в параметрах блока")
+        use_in_params_check.setChecked(define_name in self.global_defines_use_as_param)
+        use_in_params_check.setToolTip("Если включено, этот #define станет настраиваемым параметром блока в FLProg")
+        layout.addRow("", use_in_params_check)
+
+        buttons_layout = QtWidgets.QHBoxLayout()
+        btn_save = QtWidgets.QPushButton("Сохранить")
+        btn_save.setStyleSheet("background-color: #4CAF50; color: white; padding: 5px 15px;")
+        btn_cancel = QtWidgets.QPushButton("Отмена")
+        btn_cancel.setStyleSheet("padding: 5px 15px;")
+        buttons_layout.addStretch()
+        buttons_layout.addWidget(btn_cancel)
+        buttons_layout.addWidget(btn_save)
+        btn_row = QtWidgets.QWidget()
+        btn_row.setLayout(buttons_layout)
+        layout.addRow(btn_row)
+
+        def save_changes():
+            new_name = name_edit.text().strip()
+            new_value = value_edit.text().strip()
+            if not new_name:
+                QtWidgets.QMessageBox.warning(dialog, "Ошибка", "Имя не может быть пустым!")
+                return
+            if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', new_name):
+                QtWidgets.QMessageBox.warning(
+                    dialog, "Ошибка",
+                    "Имя должно начинаться с буквы или подчёркивания\n"
+                    "и содержать только буквы, цифры и подчёркивания!"
+                )
+                return
+            self.global_defines_use_as_param.discard(define_name)
+            if use_in_params_check.isChecked():
+                self.global_defines_use_as_param.add(new_name)
+            del self.global_defines[define_name]
+            self.global_defines[new_name] = new_value
+            item.setText(0, new_name)
+            item.setText(2, "parameter" if use_in_params_check.isChecked() else "global")
+            item.setText(3, new_name)
+            item.setText(4, new_value)
+            dialog.accept()
+
+        btn_save.clicked.connect(save_changes)
+        btn_cancel.clicked.connect(dialog.reject)
+
+        dialog.setLayout(layout)
+        dialog.exec_()
+
+    def _edit_parameter_define(self, item, define_name):
+        """Открывает диалог редактирования #define параметра."""
+        pd_index = next((i for i, pd in enumerate(self.parameter_defines) if pd.get('name') == define_name), None)
+        if pd_index is None:
+            return
+        pd = self.parameter_defines[pd_index]
+
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Редактировать #define параметр: {}".format(define_name))
+        dialog.resize(450, 200)
+
+        layout = QtWidgets.QFormLayout()
+
+        name_edit = QtWidgets.QLineEdit(pd.get('name', ''))
+        name_edit.setPlaceholderText("Имя макроса (например MY_PIN)")
+        name_edit.setToolTip("Имя для #define (буквы, цифры, подчёркивание)")
+        layout.addRow("Имя (#define):", name_edit)
+
+        value_edit = QtWidgets.QLineEdit(pd.get('value', ''))
+        value_edit.setPlaceholderText("Значение (например 13)")
+        value_edit.setToolTip("Значение макроса")
+        layout.addRow("Значение:", value_edit)
+
+        buttons_layout = QtWidgets.QHBoxLayout()
+        btn_save = QtWidgets.QPushButton("Сохранить")
+        btn_save.setStyleSheet("background-color: #4CAF50; color: white; padding: 5px 15px;")
+        btn_cancel = QtWidgets.QPushButton("Отмена")
+        btn_cancel.setStyleSheet("padding: 5px 15px;")
+        buttons_layout.addStretch()
+        buttons_layout.addWidget(btn_cancel)
+        buttons_layout.addWidget(btn_save)
+        btn_row = QtWidgets.QWidget()
+        btn_row.setLayout(buttons_layout)
+        layout.addRow(btn_row)
+
+        def save_changes():
+            new_name = name_edit.text().strip()
+            new_value = value_edit.text().strip()
+            if not new_name:
+                QtWidgets.QMessageBox.warning(dialog, "Ошибка", "Имя не может быть пустым!")
+                return
+            if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', new_name):
+                QtWidgets.QMessageBox.warning(
+                    dialog, "Ошибка",
+                    "Имя должно начинаться с буквы или подчёркивания\n"
+                    "и содержать только буквы, цифры и подчёркивания!"
+                )
+                return
+            self.parameter_defines[pd_index] = {'name': new_name, 'value': new_value}
+            item.setText(0, new_name)
+            item.setText(3, new_name)
+            item.setText(4, new_value)
+            dialog.accept()
+
+        btn_save.clicked.connect(save_changes)
+        btn_cancel.clicked.connect(dialog.reject)
+
+        dialog.setLayout(layout)
+        dialog.exec_()
+
     def on_tree_double_click(self, item, column):
-        """Открывает диалог редактирования переменной."""
+        """Открывает диалог редактирования переменной или #define параметра."""
         var_name = item.text(0)
+
+        if item.data(0, QtCore.Qt.UserRole) == "define":
+            self._edit_parameter_define(item, var_name)
+            return
+
+        if item.data(0, QtCore.Qt.UserRole) == "global_define":
+            self._edit_global_define(item, var_name)
+            return
 
         if var_name not in self.variables:
             return
@@ -615,6 +806,7 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
 
     def generate_block(self):
         """Генерирует .ubi файл."""
+        log.debug("generate_block: start")
         try:
             code = self.code_input.toPlainText()
             setup_code = extract_function_body(code, 'setup')
@@ -638,7 +830,9 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
                 extra_declarations=self.extra_declarations,
                 setup_code=setup_code,
                 loop_code=loop_code,
-                enable_input=self.enable_input_checkbox.isChecked()
+                enable_input=self.enable_input_checkbox.isChecked(),
+                parameter_defines=self.parameter_defines,
+                global_defines_use_as_param=self.global_defines_use_as_param
             )
 
             if (self.last_save_dir and os.path.exists(self.last_save_dir) and
@@ -655,12 +849,13 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
                     save_dir = os.path.expanduser("~")
 
             default_filename = os.path.join(save_dir, "{}.ubi".format(block_name))
-
+            log.debug("generate_block: opening save dialog default=%s", default_filename)
             filename, selected_filter = QtWidgets.QFileDialog.getSaveFileName(
                 self, "Сохранить блок", default_filename,
-                "FLProg Block (*.ubi);;All files (*.*)"
+                "FLProg Block (*.ubi);;All files (*.*)",
+                options=QtWidgets.QFileDialog.DontUseNativeDialog
             )
-
+            log.debug("generate_block: save dialog returned filename=%s", filename)
             if filename:
                 if not filename.endswith('.ubi'):
                     filename += '.ubi'
@@ -672,12 +867,14 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
                 if new_dir and "system32" not in new_dir.lower():
                     self.last_save_dir = new_dir
 
+                log.info("generate_block: saved %s", filename)
                 QtWidgets.QMessageBox.information(
                     self, "Успех",
                     "Блок успешно сохранен в формате SIXX:\n{}".format(filename)
                 )
 
         except Exception as e:
+            log.exception("generate_block: error %s", e)
             error_msg = "Ошибка при сохранении:\n{}\n\nПодробности:\n{}".format(str(e), traceback.format_exc())
             QtWidgets.QMessageBox.critical(self, "Ошибка", error_msg)
 
@@ -706,7 +903,9 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
                 extra_declarations=self.extra_declarations,
                 setup_code=setup_code,
                 loop_code=loop_code,
-                enable_input=self.enable_input_checkbox.isChecked()
+                enable_input=self.enable_input_checkbox.isChecked(),
+                parameter_defines=self.parameter_defines,
+                global_defines_use_as_param=self.global_defines_use_as_param
             )
 
             if not filename.endswith('.ubi'):

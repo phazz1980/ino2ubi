@@ -20,8 +20,41 @@ ino2ubi — Конвертер Arduino скетчей (.ino) в блоки FLPro
 """
 
 import argparse
+import logging
 import os
 import sys
+
+
+def _setup_logging():
+    """Лог в папку с программой (ino2ubi.log) для отладки падений."""
+    if logging.root.handlers:
+        return
+    app_dir = os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+    log_file = os.path.join(app_dir, "ino2ubi.log")
+    try:
+        logging.basicConfig(
+            filename=log_file,
+            level=logging.DEBUG,
+            format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+            encoding="utf-8",
+        )
+    except TypeError:
+        logging.basicConfig(
+            filename=log_file,
+            level=logging.DEBUG,
+            format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        )
+
+
+def _excepthook(etype, value, tb):
+    """Логировать необработанные исключения перед падением."""
+    _log.critical("Uncaught exception", exc_info=(etype, value, tb))
+    sys.__excepthook__(etype, value, tb)
+
+
+_setup_logging()
+_log = logging.getLogger(__name__)
+sys.excepthook = _excepthook
 
 from PyQt5 import QtWidgets
 
@@ -52,10 +85,14 @@ def main_cli():
     )
 
     args = parser.parse_args()
+    _log.info("main_cli: start, input=%s", getattr(args, "input", None))
 
     if not args.input:
+        _log.debug("main_cli: GUI mode")
         app = QtWidgets.QApplication(sys.argv)
+        _log.debug("main_cli: creating window")
         window = ArduinoToFLProgConverter()
+        _log.debug("main_cli: showing window, entering event loop")
         window.show()
         sys.exit(app.exec_())
 

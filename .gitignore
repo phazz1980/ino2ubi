@@ -10,8 +10,15 @@ ENV/
 
 # Build
 build/
+dist/
+*.exe
+!ino2ubi.exe
+*.spec
 *.egg-info/
 *.egg
+
+# Локальные скрипты (не часть работы конвертера)
+*.bat
 
 # Git temp
 .git-commit-msg.txt
@@ -20,6 +27,7 @@ msg.txt
 # IDE
 .idea/
 .vscode/
+*.code-workspace
 *.swp
 *.swo
 

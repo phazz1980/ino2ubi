@@ -42,7 +42,9 @@ def create_ubi_xml_sixx(
     extra_declarations: list,
     setup_code: str,
     loop_code: str,
-    enable_input: bool = False
+    enable_input: bool = False,
+    parameter_defines: list | None = None,
+    global_defines_use_as_param: set | list | None = None
 ) -> str:
     """Создаёт SIXX XML для FLProg блока."""
     if enable_input:
@@ -156,6 +158,21 @@ def create_ubi_xml_sixx(
     params_coll_id = next_id()
     params_xml = ""
     params_list = [(var_name, var_info) for var_name, var_info in variables.items() if var_info['role'] == 'parameter']
+    if parameter_defines:
+        for pd in parameter_defines:
+            params_list.append((pd['name'], {
+                'type': 'String',
+                'alias': pd['name'],
+                'default': pd.get('value', ''),
+            }))
+    use_as_param = global_defines_use_as_param or set()
+    for name in use_as_param:
+        if name in global_defines:
+            params_list.append((name, {
+                'type': 'String',
+                'alias': name,
+                'default': global_defines[name],
+            }))
 
     for var_name, var_info in params_list:
         adaptor_id = next_id()
@@ -177,13 +194,16 @@ def create_ubi_xml_sixx(
         params_xml += create_sixx_data_type(var_info['type'], param_type_id, instance_coll_id, next_id)
         params_xml += '\t\t\t\t\t\t<sixx.object sixx.name="hasDefaultValue" sixx.type="True" sixx.env="Core" />\n'
 
-        try:
-            if '.' in default_val:
-                params_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="numberDefaultValue" sixx.type="Float" sixx.env="Core" >{}</sixx.object>\n'.format(default_val_id, default_val)
-            else:
-                params_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="numberDefaultValue" sixx.type="SmallInteger" sixx.env="Core" >{}</sixx.object>\n'.format(default_val_id, default_val)
-        except Exception:
-            params_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="numberDefaultValue" sixx.type="SmallInteger" sixx.env="Core" >0</sixx.object>\n'.format(default_val_id)
+        if var_info['type'] == 'String':
+            params_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="numberDefaultValue" sixx.type="String" sixx.env="Core" >{}</sixx.object>\n'.format(default_val_id, html.escape(default_val))
+        else:
+            try:
+                if '.' in default_val:
+                    params_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="numberDefaultValue" sixx.type="Float" sixx.env="Core" >{}</sixx.object>\n'.format(default_val_id, default_val)
+                else:
+                    params_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="numberDefaultValue" sixx.type="SmallInteger" sixx.env="Core" >{}</sixx.object>\n'.format(default_val_id, default_val)
+            except Exception:
+                params_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="numberDefaultValue" sixx.type="SmallInteger" sixx.env="Core" >0</sixx.object>\n'.format(default_val_id)
 
         params_xml += '\t\t\t\t\t\t<sixx.object sixx.name="hasUpRange" sixx.type="False" sixx.env="Core" />\n'
         params_xml += '\t\t\t\t\t\t<sixx.object sixx.name="hasDownRange" sixx.type="False" sixx.env="Core" />\n'
@@ -224,6 +244,19 @@ def create_ubi_xml_sixx(
         decl_first_id = next_id()
 
         line = "#define {} {}".format(name, value)
+        declare_xml += '\t\t\t\t\t<sixx.object sixx.id="{}" sixx.type="CodeUserBlockDeclareStandartBlock" sixx.env="Arduino" >\n'.format(decl_id)
+        declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="name" sixx.type="String" sixx.env="Core" ></sixx.object>\n'.format(decl_name_id)
+        declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="lastPart" sixx.type="String" sixx.env="Core" ></sixx.object>\n'.format(decl_last_id)
+        declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="firstPart" sixx.type="String" sixx.env="Core" >{}</sixx.object>\n'.format(decl_first_id, html.escape(line))
+        declare_xml += '\t\t\t\t\t</sixx.object>\n'
+
+    for pd in (parameter_defines or []):
+        decl_id = next_id()
+        decl_name_id = next_id()
+        decl_last_id = next_id()
+        decl_first_id = next_id()
+
+        line = "#define {} {}".format(pd['name'], pd.get('value', ''))
         declare_xml += '\t\t\t\t\t<sixx.object sixx.id="{}" sixx.type="CodeUserBlockDeclareStandartBlock" sixx.env="Arduino" >\n'.format(decl_id)
         declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="name" sixx.type="String" sixx.env="Core" ></sixx.object>\n'.format(decl_name_id)
         declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="lastPart" sixx.type="String" sixx.env="Core" ></sixx.object>\n'.format(decl_last_id)
