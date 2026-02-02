@@ -371,3 +371,66 @@
 2026-02-02 22:02:55,942 DEBUG [gui] generate_block: opening save dialog default=C:\Users\fotne\YandexDisk\Flprog\newWork\sketch_jan13a.ubi
 2026-02-02 22:02:58,520 DEBUG [gui] generate_block: save dialog returned filename=C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ubi
 2026-02-02 22:02:58,522 INFO [gui] generate_block: saved C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ubi
+2026-02-02 22:13:36,110 INFO [__main__] main_cli: start, input=None
+2026-02-02 22:13:36,111 DEBUG [__main__] main_cli: GUI mode
+2026-02-02 22:13:36,129 DEBUG [__main__] main_cli: creating window
+2026-02-02 22:13:36,129 DEBUG [gui] ArduinoToFLProgConverter.__init__: start
+2026-02-02 22:13:36,143 DEBUG [gui] ArduinoToFLProgConverter.__init__: create_widgets
+2026-02-02 22:13:36,489 DEBUG [gui] ArduinoToFLProgConverter.__init__: done, frozen=True
+2026-02-02 22:13:36,489 DEBUG [__main__] main_cli: showing window, entering event loop
+2026-02-02 22:13:36,550 INFO [gui] _start_update_check: silent=True
+2026-02-02 22:13:36,602 DEBUG [gui] _start_update_check: progress shown, starting thread
+2026-02-02 22:13:36,602 DEBUG [gui] UpdateCheckerWorker.run: start
+2026-02-02 22:13:37,047 DEBUG [gui] UpdateCheckerWorker.run: no update latest=1.6
+2026-02-02 22:13:37,048 INFO [gui] update_check on_finished: has_update=False latest_ver=1.6
+2026-02-02 22:13:55,112 DEBUG [gui] load_arduino_file: opening dialog start_dir=C:\Users\fotne\YandexDisk\Flprog\newWork
+2026-02-02 22:13:56,521 DEBUG [gui] load_arduino_file: dialog returned filename=C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ino
+2026-02-02 22:13:56,523 INFO [gui] load_arduino_file: loaded C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ino
+2026-02-02 22:13:59,072 DEBUG [gui] parse_code: start
+2026-02-02 22:13:59,074 DEBUG [gui] parse_code: parse_arduino_code done
+2026-02-02 22:14:03,580 DEBUG [gui] generate_block: start
+2026-02-02 22:14:03,582 DEBUG [gui] generate_block: opening save dialog default=C:\Users\fotne\YandexDisk\Flprog\newWork\sketch_jan13a.ubi
+2026-02-02 22:14:09,400 DEBUG [gui] generate_block: save dialog returned filename=C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ubi
+2026-02-02 22:14:09,402 INFO [gui] generate_block: saved C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ubi
+2026-02-02 22:26:12,033 INFO [__main__] main_cli: start, input=None
+2026-02-02 22:26:12,033 DEBUG [__main__] main_cli: GUI mode
+2026-02-02 22:26:12,051 DEBUG [__main__] main_cli: creating window
+2026-02-02 22:26:12,051 DEBUG [gui] ArduinoToFLProgConverter.__init__: start
+2026-02-02 22:26:12,065 DEBUG [gui] ArduinoToFLProgConverter.__init__: create_widgets
+2026-02-02 22:26:12,378 DEBUG [gui] ArduinoToFLProgConverter.__init__: done, frozen=True
+2026-02-02 22:26:12,378 DEBUG [__main__] main_cli: showing window, entering event loop
+2026-02-02 22:26:12,434 INFO [gui] _start_update_check: silent=True
+2026-02-02 22:26:12,486 DEBUG [gui] _start_update_check: progress shown, starting thread
+2026-02-02 22:26:12,486 DEBUG [gui] UpdateCheckerWorker.run: start
+2026-02-02 22:26:12,917 DEBUG [gui] UpdateCheckerWorker.run: no update latest=1.6
+2026-02-02 22:26:12,918 INFO [gui] update_check on_finished: has_update=False latest_ver=1.6
+2026-02-02 22:26:14,008 DEBUG [gui] load_arduino_file: opening dialog start_dir=C:\Users\fotne\YandexDisk\Flprog\newWork
+2026-02-02 22:26:15,426 DEBUG [gui] load_arduino_file: dialog returned filename=C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ino
+2026-02-02 22:26:15,428 INFO [gui] load_arduino_file: loaded C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ino
+2026-02-02 22:26:17,226 DEBUG [gui] parse_code: start
+2026-02-02 22:26:17,228 DEBUG [gui] parse_code: parse_arduino_code done
+2026-02-02 22:26:30,179 DEBUG [gui] generate_block: start
+2026-02-02 22:26:30,180 DEBUG [gui] generate_block: opening save dialog default=C:\Users\fotne\YandexDisk\Flprog\newWork\sketch_jan13a.ubi
+2026-02-02 22:26:39,477 DEBUG [gui] generate_block: save dialog returned filename=C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ubi
+2026-02-02 22:26:39,478 INFO [gui] generate_block: saved C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ubi
+2026-02-02 22:37:32,364 INFO [__main__] main_cli: start, input=None
+2026-02-02 22:37:32,364 DEBUG [__main__] main_cli: GUI mode
+2026-02-02 22:37:32,381 DEBUG [__main__] main_cli: creating window
+2026-02-02 22:37:32,381 DEBUG [gui] ArduinoToFLProgConverter.__init__: start
+2026-02-02 22:37:32,388 DEBUG [gui] ArduinoToFLProgConverter.__init__: create_widgets
+2026-02-02 22:37:32,778 DEBUG [gui] ArduinoToFLProgConverter.__init__: done, frozen=True
+2026-02-02 22:37:32,778 DEBUG [__main__] main_cli: showing window, entering event loop
+2026-02-02 22:37:32,846 INFO [gui] _start_update_check: silent=True
+2026-02-02 22:37:32,903 DEBUG [gui] _start_update_check: progress shown, starting thread
+2026-02-02 22:37:32,904 DEBUG [gui] UpdateCheckerWorker.run: start
+2026-02-02 22:37:33,388 DEBUG [gui] UpdateCheckerWorker.run: no update latest=1.6
+2026-02-02 22:37:33,388 INFO [gui] update_check on_finished: has_update=False latest_ver=1.6
+2026-02-02 22:37:38,492 DEBUG [gui] load_arduino_file: opening dialog start_dir=C:\Users\fotne\YandexDisk\Flprog\newWork
+2026-02-02 22:37:39,932 DEBUG [gui] load_arduino_file: dialog returned filename=C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ino
+2026-02-02 22:37:39,933 INFO [gui] load_arduino_file: loaded C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ino
+2026-02-02 22:37:42,047 DEBUG [gui] parse_code: start
+2026-02-02 22:37:42,050 DEBUG [gui] parse_code: parse_arduino_code done
+2026-02-02 22:37:56,073 DEBUG [gui] generate_block: start
+2026-02-02 22:37:56,074 DEBUG [gui] generate_block: opening save dialog default=C:\Users\fotne\YandexDisk\Flprog\newWork\sketch_jan13a.ubi
+2026-02-02 22:37:59,432 DEBUG [gui] generate_block: save dialog returned filename=C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ubi
+2026-02-02 22:37:59,434 INFO [gui] generate_block: saved C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ubi

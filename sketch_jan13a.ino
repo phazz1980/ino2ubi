@@ -1,7 +1,7 @@
 /*Программа для управления камерой*/
 #include <SoftwareSerial.h>
 #define qwe 12
-int sensorPan = A0;     // канал вправо/влево 
+static int sensorPan = A0;     // канал вправо/влево 
 int sensorTilt = A1;    // канал вверх/вниз 
 int sensorFocus = A2;   // канал фокус
 int xVal = 0;           // переменная для хранения значения с потенциометра вправо/влево

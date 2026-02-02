@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 # Сборка: pyinstaller arduino_to_flprog_GLOBAL_COMPLETE.spec
-# exe = launcher, остальное (gui, parser, generator, constants) — скрипты рядом с exe.
+# exe = launcher из корня; скрипты приложения в папке scripts\ рядом с exe.
 # Иконка: icon.ico в папке .spec перед сборкой.
 
 import os

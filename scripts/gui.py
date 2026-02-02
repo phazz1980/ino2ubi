@@ -1,0 +1,874 @@
+"""
+Графический интерфейс (GUI) для ino2ubi — конвертера Arduino в блоки FLProg.
+"""
+
+import json
+import logging
+import os
+import re
+import ssl
+import sys
+import traceback
+import urllib.error
+import urllib.request
+
+from PyQt5 import QtWidgets, QtCore, QtGui
+
+from constants import VERSION, GITHUB_REPO, DEFINE_TYPE_CHOICES
+
+log = logging.getLogger(__name__)
+from parser import parse_arduino_code, extract_function_body
+from generator import create_ubi_xml_sixx
+
+
+def _parse_version(v):
+    """Преобразует строку версии в кортеж для сравнения (1.3.0 -> (1, 3, 0))."""
+    try:
+        return tuple(int(x) for x in re.sub(r'[^\d.]', '', str(v)).split('.') if x)
+    except (ValueError, AttributeError):
+        return (0,)
+
+
+class UpdateCheckerWorker(QtCore.QObject):
+    """Фоновый поток проверки обновлений (urllib + ssl без проверки сертификата)."""
+
+    finished = QtCore.pyqtSignal(bool, str, str)
+    error = QtCore.pyqtSignal(str)
+
+    def run(self):
+        log.debug("UpdateCheckerWorker.run: start")
+        try:
+            api_url = "https://api.github.com/repos/{}/releases/latest".format(GITHUB_REPO)
+            req = urllib.request.Request(api_url, headers={"User-Agent": "ino2ubi-updater/1.0"})
+            ctx = None
+            try:
+                if hasattr(ssl, "create_unverified_context"):
+                    ctx = ssl.create_unverified_context()
+                else:
+                    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS)
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+            except Exception:
+                ctx = None
+            with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
+                data = json.loads(r.read().decode())
+            tag = data.get("tag_name", "")
+            html_url = data.get("html_url", "https://github.com/{}/releases".format(GITHUB_REPO))
+            latest = tag.lstrip("v").strip() if tag else ""
+            if not latest:
+                self.error.emit("Не удалось получить версию из GitHub")
+                return
+            if _parse_version(latest) > _parse_version(VERSION):
+                download_url = html_url
+                for a in data.get("assets", []):
+                    name = a.get("name", "")
+                    if name.endswith(".zip"):
+                        download_url = a.get("browser_download_url", download_url)
+                        break
+                else:
+                    for a in data.get("assets", []):
+                        if a.get("name", "").endswith(".exe"):
+                            download_url = a.get("browser_download_url", download_url)
+                            break
+                log.debug("UpdateCheckerWorker.run: has_update=True latest=%s", latest)
+                self.finished.emit(True, latest, download_url)
+            else:
+                log.debug("UpdateCheckerWorker.run: no update latest=%s", latest)
+                self.finished.emit(False, latest, "")
+        except urllib.error.HTTPError as e:
+            log.warning("UpdateCheckerWorker.run: HTTPError %s", e)
+            if e.code == 404:
+                self.error.emit("Релизы ещё не опубликованы на GitHub.\nСоздайте Release в репозитории.")
+            else:
+                self.error.emit("GitHub: HTTP {} — {}".format(e.code, e.reason))
+        except Exception as e:
+            log.exception("UpdateCheckerWorker.run: exception %s", e)
+            self.error.emit(str(e))
+
+
+def _resource_dir():
+    """Каталог с ресурсами: при сборке exe — sys._MEIPASS, иначе — каталог gui.py (или корень проекта)."""
+    if getattr(sys, "frozen", False):
+        return getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _project_root():
+    """Корень проекта: родитель каталога scripts (для icon.ico, README.md)."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    parent = os.path.dirname(script_dir)
+    return parent if os.path.basename(script_dir).lower() == "scripts" else script_dir
+
+
+class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
+    """
+    Главный класс приложения для конвертации Arduino кода в блоки FLProg.
+    """
+
+    def __init__(self):
+        log.debug("ArduinoToFLProgConverter.__init__: start")
+        super().__init__()
+        self.setWindowTitle("ino2ubi v{}".format(VERSION))
+        self.resize(1400, 850)
+        self._set_window_icon()
+        self.variables = {}
+        self.functions = {}
+        self.global_section_raw = ""
+        self.global_includes = []
+        self.defines = []  # список {name, value, role}: #define как переменные с ролями global | parameter
+        self.extra_declarations = []
+        self.static_declarations = []  # static-переменные из global, в GUI не показываются, передаются в генератор
+        self._safe_home = self._get_safe_home_dir()
+        app_dir = self._app_dir()
+        self.last_save_dir = app_dir if (app_dir and os.path.isdir(app_dir)) else self._safe_home
+        log.debug("ArduinoToFLProgConverter.__init__: create_widgets")
+        self.create_widgets()
+        log.debug("ArduinoToFLProgConverter.__init__: done, frozen=%s", getattr(sys, "frozen", False))
+        # Автоматическая проверка обновлений при запуске (только exe). GUI блокируется на время проверки.
+        if getattr(sys, "frozen", False):
+            QtCore.QTimer.singleShot(0, lambda: self._start_update_check(silent=True))
+
+    def _start_update_check(self, silent=False):
+        """Запуск проверки обновлений в фоновом потоке (urllib + ssl без проверки сертификата)."""
+        log.info("_start_update_check: silent=%s", silent)
+        if not getattr(sys, "frozen", False) and not silent:
+            QtWidgets.QMessageBox.information(
+                self, "Проверка обновлений",
+                "Проверка доступна только при запуске из exe-файла."
+            )
+            return
+        # Всегда показываем модальное окно на время проверки — блокируем GUI, чтобы не было вылетов при выборе файла.
+        self._update_progress = QtWidgets.QProgressDialog(
+            "Проверка обновлений...", None, 0, 0, self
+        )
+        self._update_progress.setWindowModality(QtCore.Qt.WindowModal)
+        self._update_progress.setWindowTitle("Обновления")
+        self._update_progress.setCancelButton(None)
+        self._update_progress.show()
+        QtWidgets.QApplication.processEvents()
+        log.debug("_start_update_check: progress shown, starting thread")
+
+        worker = UpdateCheckerWorker()
+        thread = QtCore.QThread()
+        worker.moveToThread(thread)
+        self._update_checker = (worker, thread)
+
+        def on_finished(has_update, latest_ver, download_url):
+            log.info("update_check on_finished: has_update=%s latest_ver=%s", has_update, latest_ver)
+            if getattr(self, "_update_progress", None):
+                self._update_progress.close()
+                self._update_progress = None
+            thread.quit()
+            if has_update:
+                msg = (
+                    "Доступна новая версия <b>{}</b>.\n\n"
+                    "Текущая версия: {}\n\n"
+                    "Открыть загрузку (zip)?"
+                ).format(latest_ver, VERSION)
+                ans = QtWidgets.QMessageBox.question(
+                    self, "Доступно обновление", msg,
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.Yes
+                )
+                if ans == QtWidgets.QMessageBox.Yes and download_url:
+                    QtGui.QDesktopServices.openUrl(QtCore.QUrl(download_url))
+            elif not silent:
+                QtWidgets.QMessageBox.information(
+                    self, "Обновления", "Установлена актуальная версия ({}).".format(VERSION)
+                )
+
+        def on_error(err_msg):
+            log.warning("update_check on_error: %s", err_msg)
+            if getattr(self, "_update_progress", None):
+                self._update_progress.close()
+                self._update_progress = None
+            thread.quit()
+            if not silent:
+                QtWidgets.QMessageBox.warning(
+                    self, "Ошибка проверки обновлений",
+                    "Не удалось получить данные:\n{}".format(err_msg)
+                )
+
+        thread.started.connect(worker.run)
+        worker.finished.connect(on_finished)
+        worker.error.connect(on_error)
+        thread.start()
+
+    def _app_dir(self):
+        """Папка, в которой находится ino2ubi (exe или скрипты)."""
+        if getattr(sys, "frozen", False):
+            return os.path.dirname(os.path.abspath(sys.executable))
+        return os.path.dirname(os.path.abspath(__file__))
+
+    def _get_safe_home_dir(self):
+        """Начальная папка для диалогов: никогда не system32."""
+        home = os.path.expanduser("~")
+        if not home:
+            home = os.environ.get("USERPROFILE", "")
+        if not home:
+            home = os.environ.get("HOMEDRIVE", "") + os.environ.get("HOMEPATH", "")
+        home = os.path.abspath(home) if home else ""
+        try:
+            cwd = os.path.abspath(os.getcwd())
+            if "system32" in cwd.lower() or "system64" in cwd.lower():
+                pass
+            elif home and os.path.isdir(home):
+                pass
+            else:
+                home = cwd if os.path.isdir(cwd) else "."
+        except Exception:
+            home = home or "."
+        return home if (home and os.path.isdir(home)) else "."
+
+    def _set_window_icon(self):
+        """Устанавливает иконку окна из icon.ico (в каталоге скриптов или в корне проекта)."""
+        base_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+        icon_path = os.path.join(base_dir, "icon.ico")
+        if not os.path.isfile(icon_path):
+            icon_path = os.path.join(_project_root(), "icon.ico")
+        if os.path.isfile(icon_path):
+            self.setWindowIcon(QtGui.QIcon(icon_path))
+        else:
+            icon = QtWidgets.QApplication.style().standardIcon(QtWidgets.QStyle.SP_FileDialogContentsView)
+            if not icon.isNull():
+                self.setWindowIcon(icon)
+
+    def create_widgets(self):
+        central_widget = QtWidgets.QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QtWidgets.QHBoxLayout(central_widget)
+
+        menubar = self.menuBar()
+        help_menu = menubar.addMenu("Справка")
+        act_help = QtWidgets.QAction("Справка...", self)
+        act_help.setShortcut("F1")
+        act_help.triggered.connect(self.show_help)
+        help_menu.addAction(act_help)
+        act_about = QtWidgets.QAction("О программе", self)
+        act_about.triggered.connect(self.show_about)
+        help_menu.addAction(act_about)
+        act_updates = QtWidgets.QAction("Проверить обновления", self)
+        act_updates.triggered.connect(self.check_for_updates)
+        help_menu.addAction(act_updates)
+
+        left_widget = QtWidgets.QWidget()
+        left_layout = QtWidgets.QVBoxLayout(left_widget)
+
+        left_layout.addWidget(QtWidgets.QLabel("Arduino Code (вставка: Ctrl+V или правая кнопка мыши -> Вставить):"))
+
+        self.code_input = QtWidgets.QPlainTextEdit()
+        self.code_input.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.code_input.customContextMenuRequested.connect(self.show_code_menu)
+        left_layout.addWidget(self.code_input)
+
+        code_buttons_layout = QtWidgets.QHBoxLayout()
+        btn_load = QtWidgets.QPushButton("Загрузить .ino")
+        btn_load.clicked.connect(self.load_arduino_file)
+        code_buttons_layout.addWidget(btn_load)
+
+        btn_clear = QtWidgets.QPushButton("Очистить")
+        btn_clear.clicked.connect(self.clear_code)
+        code_buttons_layout.addWidget(btn_clear)
+
+        btn_parse = QtWidgets.QPushButton("Парсить код")
+        btn_parse.clicked.connect(self.parse_code)
+        code_buttons_layout.addWidget(btn_parse)
+
+        left_layout.addLayout(code_buttons_layout)
+
+        right_widget = QtWidgets.QWidget()
+        right_layout = QtWidgets.QVBoxLayout(right_widget)
+
+        self.tabs = QtWidgets.QTabWidget()
+
+        var_tab = QtWidgets.QWidget()
+        var_layout = QtWidgets.QVBoxLayout(var_tab)
+        var_layout.addWidget(QtWidgets.QLabel("Найденные переменные (двойной клик для редактирования):"))
+
+        self.var_tree = QtWidgets.QTreeWidget()
+        self.var_tree.setHeaderLabels(["Переменная", "Тип", "Роль", "Псевдоним", "По умолчанию"])
+        self.var_tree.setColumnWidth(0, 120)
+        self.var_tree.setColumnWidth(1, 100)
+        self.var_tree.setColumnWidth(2, 100)
+        self.var_tree.setColumnWidth(3, 120)
+        self.var_tree.setColumnWidth(4, 100)
+        self.var_tree.itemDoubleClicked.connect(self.on_tree_double_click)
+        var_layout.addWidget(self.var_tree)
+
+        self.tabs.addTab(var_tab, "Переменные")
+
+        func_tab = QtWidgets.QWidget()
+        func_layout = QtWidgets.QVBoxLayout(func_tab)
+        func_layout.addWidget(QtWidgets.QLabel("Найденные функции (двойной клик для редактирования):"))
+
+        self.func_tree = QtWidgets.QTreeWidget()
+        self.func_tree.setHeaderLabels(["Имя функции", "Возвращает", "Параметры", "Тело функции"])
+        self.func_tree.setColumnWidth(0, 120)
+        self.func_tree.setColumnWidth(1, 80)
+        self.func_tree.setColumnWidth(2, 150)
+        self.func_tree.setColumnWidth(3, 300)
+        self.func_tree.itemDoubleClicked.connect(self.edit_function)
+        func_layout.addWidget(self.func_tree)
+
+        self.tabs.addTab(func_tab, "Функции")
+
+        right_layout.addWidget(self.tabs, 3)
+
+        settings_group = QtWidgets.QGroupBox("Настройки блока")
+        settings_layout = QtWidgets.QGridLayout()
+
+        settings_layout.addWidget(QtWidgets.QLabel("Название блока:"), 0, 0)
+        self.block_name_entry = QtWidgets.QLineEdit("Custom Block")
+        settings_layout.addWidget(self.block_name_entry, 0, 1)
+
+        settings_layout.addWidget(QtWidgets.QLabel("Описание блока:"), 1, 0)
+        self.block_description_entry = QtWidgets.QTextEdit()
+        self.block_description_entry.setPlainText("Автоматически сгенерированный блок")
+        self.block_description_entry.setFixedHeight(80)
+        settings_layout.addWidget(self.block_description_entry, 1, 1)
+
+        self.enable_input_checkbox = QtWidgets.QCheckBox("Вход En (условие выполнения кода в Loop: if(En))")
+        self.enable_input_checkbox.setChecked(False)
+        settings_layout.addWidget(self.enable_input_checkbox, 2, 0, 1, 2)
+
+        settings_group.setLayout(settings_layout)
+        right_layout.addWidget(settings_group, 1)
+
+        btn_generate = QtWidgets.QPushButton("Сгенерировать .ubi блок")
+        btn_generate.clicked.connect(self.generate_block)
+        right_layout.addWidget(btn_generate, 0)
+
+        main_layout.addWidget(left_widget, 1)
+        main_layout.addWidget(right_widget, 1)
+
+    def show_code_menu(self, position):
+        menu = QtWidgets.QMenu()
+        menu.addAction("Вставить", self.paste_code)
+        menu.addAction("Копировать", self.copy_code)
+        menu.addAction("Вырезать", self.cut_code)
+        menu.addSeparator()
+        menu.addAction("Выделить все", self.select_all_code)
+        menu.exec_(self.code_input.mapToGlobal(position))
+
+    def paste_code(self):
+        self.code_input.insertPlainText(QtWidgets.QApplication.clipboard().text())
+
+    def copy_code(self):
+        cursor = self.code_input.textCursor()
+        if cursor.hasSelection():
+            QtWidgets.QApplication.clipboard().setText(cursor.selectedText())
+
+    def cut_code(self):
+        cursor = self.code_input.textCursor()
+        if cursor.hasSelection():
+            QtWidgets.QApplication.clipboard().setText(cursor.selectedText())
+            cursor.removeSelectedText()
+
+    def select_all_code(self):
+        self.code_input.selectAll()
+
+    def _load_help_text(self):
+        """Загружает справку из README.md (в exe — из папки распаковки PyInstaller, иначе — корень проекта)."""
+        candidates = [
+            os.path.join(_resource_dir(), "README.md"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "README.md"),
+            os.path.join(_project_root(), "README.md"),
+        ]
+        if getattr(sys, "frozen", False) and getattr(sys, "executable", None):
+            candidates.append(os.path.join(os.path.dirname(sys.executable), "README.md"))
+        for readme_path in candidates:
+            try:
+                with open(readme_path, "r", encoding="utf-8") as f:
+                    return f.read()
+            except OSError:
+                continue
+        return (
+            "# Справка — ino2ubi\n\n"
+            "Файл справки (README.md) не найден.\n\n"
+            "**Назначение:** конвертация Arduino скетчей (.ino) в пользовательские блоки (.ubi) для FLProg.\n\n"
+            "**Использование:** вставьте или загрузите код, задайте имя и описание блока, нажмите «Сгенерировать .ubi».\n\n"
+            "Полная документация — в файле README.md рядом с программой."
+        )
+
+    def show_help(self):
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Справка — ino2ubi")
+        dialog.resize(700, 550)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        text = QtWidgets.QTextEdit()
+        text.setReadOnly(True)
+        help_text = self._load_help_text()
+        try:
+            text.setMarkdown(help_text)
+        except AttributeError:
+            text.setPlainText(help_text)
+        text.setFont(QtGui.QFont("Consolas", 9))
+        layout.addWidget(text)
+        btn_close = QtWidgets.QPushButton("Закрыть")
+        btn_close.clicked.connect(dialog.accept)
+        layout.addWidget(btn_close)
+        dialog.exec_()
+
+    def show_about(self):
+        QtWidgets.QMessageBox.about(
+            self,
+            "О программе",
+            (
+                "<h3>ino2ubi</h3>"
+                "<p>Конвертация Arduino скетчей (.ino) в пользовательские блоки (.ubi) для FLProg.</p>"
+                "<p><b>Версия:</b> {}</p>"
+                "<p><b>Требования:</b> Python 3.x, PyQt5</p>"
+                "<p>Справка: меню <b>Справка → Справка...</b> или клавиша <b>F1</b></p>"
+            ).format(VERSION)
+        )
+
+    def check_for_updates(self):
+        """Проверка обновлений exe на GitHub (только при запуске из exe)."""
+        self._start_update_check(silent=False)
+
+    def clear_code(self):
+        self.code_input.clear()
+
+    def load_arduino_file(self):
+        start_dir = self.last_save_dir if os.path.isdir(self.last_save_dir) else self._safe_home
+        log.debug("load_arduino_file: opening dialog start_dir=%s", start_dir)
+        # DontUseNativeDialog — избегаем падений нативного диалога Windows в папках Yandex.Disk и др.
+        filename, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Выберите Arduino файл", start_dir, "Arduino files (*.ino);;All files (*.*)",
+            options=QtWidgets.QFileDialog.DontUseNativeDialog
+        )
+        log.debug("load_arduino_file: dialog returned filename=%s", filename)
+        if filename:
+            try:
+                with open(filename, 'r', encoding='utf-8') as f:
+                    self.code_input.setPlainText(f.read())
+                base_name = os.path.splitext(os.path.basename(filename))[0]
+                self.block_name_entry.setText(base_name)
+                log.info("load_arduino_file: loaded %s", filename)
+            except Exception as e:
+                log.exception("load_arduino_file: error %s", e)
+                QtWidgets.QMessageBox.critical(self, "Ошибка", "Не удалось загрузить файл: {}".format(e))
+
+    def parse_code(self):
+        """Парсит Arduino код и обновляет таблицы."""
+        log.debug("parse_code: start")
+        code = self.code_input.toPlainText()
+        self.var_tree.clear()
+        self.variables = {}
+        self.func_tree.clear()
+        self.functions = {}
+        self.global_section_raw = ""
+        self.global_includes = []
+        self.defines = []
+        self.extra_declarations = []
+        self.static_declarations = []
+
+        result = parse_arduino_code(code)
+        log.debug("parse_code: parse_arduino_code done")
+
+        if result['leading_comment']:
+            self.block_description_entry.setPlainText(result['leading_comment'])
+
+        self.variables = result['variables']
+        self.functions = result['functions']
+        self.global_section_raw = result['global_section_raw']
+        self.global_includes = result['global_includes']
+        self.defines = result.get('defines', [])
+        self.extra_declarations = result['extra_declarations']
+        self.static_declarations = result.get('static_declarations', [])
+
+        for func_name, func_info in self.functions.items():
+            params_display = func_info['params'] if func_info['params'] else "(нет)"
+            body_preview = func_info['body'][:50] + "..." if len(func_info['body']) > 50 else func_info['body']
+            item = QtWidgets.QTreeWidgetItem([func_name, func_info['return_type'], params_display, body_preview])
+            self.func_tree.addTopLevelItem(item)
+
+        for var_name, var_info in self.variables.items():
+            default_display = var_info.get('default') or ""
+            item = QtWidgets.QTreeWidgetItem([
+                var_name, var_info['type'], var_info['role'], var_info['alias'], default_display
+            ])
+            self.var_tree.addTopLevelItem(item)
+
+        for d in self.defines:
+            name = d.get('name', '')
+            value = d.get('value', '')
+            role = d.get('role', 'global')
+            define_type = d.get('type', 'String')
+            item = QtWidgets.QTreeWidgetItem([
+                name, define_type, role, name, value
+            ])
+            item.setData(0, QtCore.Qt.UserRole, "define")
+            self.var_tree.addTopLevelItem(item)
+
+        QtWidgets.QMessageBox.information(
+            self,
+            "Парсинг",
+            "Найдено глобальных переменных: {}\nНайдено функций: {}\nНайдено #include: {}\nНайдено #define: {}".format(
+                len(self.variables),
+                len(self.functions),
+                len(self.global_includes),
+                len(self.defines),
+            ),
+        )
+
+    def edit_function(self, item, column):
+        func_name = item.text(0)
+        func_info = self.functions[func_name]
+
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Редактировать функцию: {}".format(func_name))
+        dialog.resize(600, 400)
+
+        layout = QtWidgets.QVBoxLayout()
+        layout.addWidget(QtWidgets.QLabel("Имя функции: {}".format(func_name)))
+        layout.addWidget(QtWidgets.QLabel("Возвращает: {}".format(func_info['return_type'])))
+        layout.addWidget(QtWidgets.QLabel("Параметры: {}".format(func_info['params'])))
+        layout.addWidget(QtWidgets.QLabel("Тело функции:"))
+
+        body_text = QtWidgets.QPlainTextEdit()
+        body_text.setPlainText(func_info['body'])
+        layout.addWidget(body_text)
+
+        def save_function():
+            new_body = body_text.toPlainText().strip()
+            self.functions[func_name]['body'] = new_body
+            body_preview = new_body[:50] + "..." if len(new_body) > 50 else new_body
+            item.setText(3, body_preview)
+            dialog.accept()
+
+        btn_save = QtWidgets.QPushButton("Сохранить")
+        btn_save.clicked.connect(save_function)
+        layout.addWidget(btn_save)
+
+        dialog.setLayout(layout)
+        dialog.exec_()
+
+    def _edit_define(self, item, define_index):
+        """Открывает диалог редактирования #define (роль, тип, значение по умолчанию)."""
+        if define_index < 0 or define_index >= len(self.defines):
+            return
+        d = self.defines[define_index]
+
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Редактировать #define: {}".format(d.get('name', '')))
+        dialog.resize(450, 260)
+
+        layout = QtWidgets.QFormLayout()
+
+        name_edit = QtWidgets.QLineEdit(d.get('name', ''))
+        name_edit.setPlaceholderText("Имя макроса (например MY_PIN)")
+        name_edit.setToolTip("Имя для #define (буквы, цифры, подчёркивание)")
+        layout.addRow("Имя (#define):", name_edit)
+
+        value_edit = QtWidgets.QLineEdit(d.get('value', ''))
+        value_edit.setPlaceholderText("Значение по умолчанию (например 13)")
+        value_edit.setToolTip("Значение макроса по умолчанию")
+        layout.addRow("Значение по умолчанию:", value_edit)
+
+        type_combo = QtWidgets.QComboBox()
+        type_combo.addItems(DEFINE_TYPE_CHOICES)
+        current_type = d.get('type', 'String')
+        if current_type in DEFINE_TYPE_CHOICES:
+            type_combo.setCurrentText(current_type)
+        else:
+            type_combo.setCurrentText('String')
+        type_combo.setToolTip("Тип переменной Arduino (int, long, float, String, bool и др.)")
+        layout.addRow("Тип:", type_combo)
+
+        role_combo = QtWidgets.QComboBox()
+        role_combo.addItems(["global", "parameter"])
+        role_combo.setCurrentText(d.get('role', 'global'))
+        role_combo.setToolTip(
+            "global — константа в коде блока\n"
+            "parameter — настраиваемый параметр блока в FLProg"
+        )
+        layout.addRow("Роль:", role_combo)
+
+        buttons_layout = QtWidgets.QHBoxLayout()
+        btn_save = QtWidgets.QPushButton("Сохранить")
+        btn_save.setStyleSheet("background-color: #4CAF50; color: white; padding: 5px 15px;")
+        btn_cancel = QtWidgets.QPushButton("Отмена")
+        btn_cancel.setStyleSheet("padding: 5px 15px;")
+        buttons_layout.addStretch()
+        buttons_layout.addWidget(btn_cancel)
+        buttons_layout.addWidget(btn_save)
+        btn_row = QtWidgets.QWidget()
+        btn_row.setLayout(buttons_layout)
+        layout.addRow(btn_row)
+
+        def save_changes():
+            new_name = name_edit.text().strip()
+            new_value = value_edit.text().strip()
+            new_type = type_combo.currentText()
+            new_role = role_combo.currentText()
+            if not new_name:
+                QtWidgets.QMessageBox.warning(dialog, "Ошибка", "Имя не может быть пустым!")
+                return
+            if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', new_name):
+                QtWidgets.QMessageBox.warning(
+                    dialog, "Ошибка",
+                    "Имя должно начинаться с буквы или подчёркивания\n"
+                    "и содержать только буквы, цифры и подчёркивания!"
+                )
+                return
+            self.defines[define_index] = {'name': new_name, 'value': new_value, 'role': new_role, 'type': new_type}
+            item.setText(0, new_name)
+            item.setText(1, new_type)
+            item.setText(2, new_role)
+            item.setText(3, new_name)
+            item.setText(4, new_value)
+            dialog.accept()
+
+        btn_save.clicked.connect(save_changes)
+        btn_cancel.clicked.connect(dialog.reject)
+
+        dialog.setLayout(layout)
+        dialog.exec_()
+
+    def on_tree_double_click(self, item, column):
+        """Открывает диалог редактирования переменной или #define."""
+        var_name = item.text(0)
+
+        if item.data(0, QtCore.Qt.UserRole) == "define":
+            define_index = next((i for i, d in enumerate(self.defines) if d.get('name') == var_name), -1)
+            self._edit_define(item, define_index)
+            return
+
+        if var_name not in self.variables:
+            return
+
+        var_info = self.variables[var_name]
+
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Редактировать переменную: {}".format(var_name))
+        dialog.resize(500, 400)
+
+        layout = QtWidgets.QVBoxLayout()
+
+        info_group = QtWidgets.QGroupBox("Информация")
+        info_layout = QtWidgets.QFormLayout()
+        name_label = QtWidgets.QLabel(var_name)
+        name_label.setStyleSheet("font-weight: bold;")
+        info_layout.addRow("Имя переменной:", name_label)
+        type_label = QtWidgets.QLabel(var_info['type'])
+        type_label.setStyleSheet("font-weight: bold;")
+        info_layout.addRow("Тип данных:", type_label)
+        info_group.setLayout(info_layout)
+        layout.addWidget(info_group)
+
+        settings_group = QtWidgets.QGroupBox("Настройки")
+        settings_layout = QtWidgets.QFormLayout()
+
+        role_combo = QtWidgets.QComboBox()
+        role_combo.addItems(["variable", "input", "output", "parameter"])
+        role_combo.setCurrentText(var_info['role'])
+        role_combo.setToolTip(
+            "variable - внутренняя переменная блока\n"
+            "input - входной параметр (получает данные извне)\n"
+            "output - выходной параметр (передаёт данные наружу)\n"
+            "parameter - настраиваемый параметр блока"
+        )
+        settings_layout.addRow("Роль в блоке:", role_combo)
+
+        alias_edit = QtWidgets.QLineEdit(var_info['alias'])
+        alias_edit.setPlaceholderText("Введите псевдоним переменной")
+        alias_edit.setToolTip("Имя переменной, которое будет использоваться в блоке FLProg")
+        settings_layout.addRow("Псевдоним:", alias_edit)
+
+        default_edit = QtWidgets.QLineEdit(var_info.get('default', '') or '')
+        default_edit.setPlaceholderText("Введите значение по умолчанию")
+        default_edit.setToolTip("Начальное значение переменной (для parameter и variable)")
+        settings_layout.addRow("Значение по умолчанию:", default_edit)
+
+        settings_group.setLayout(settings_layout)
+        layout.addWidget(settings_group)
+
+        description_group = QtWidgets.QGroupBox("Описание роли")
+        description_layout = QtWidgets.QVBoxLayout()
+        description_text = QtWidgets.QTextEdit()
+        description_text.setReadOnly(True)
+        description_text.setMaximumHeight(100)
+
+        role_descriptions = {
+            "variable": "Внутренняя переменная блока.\n"
+                       "Используется для хранения промежуточных данных внутри блока.\n"
+                       "Не видна извне и не настраивается пользователем.",
+            "input": "Входной параметр блока.\n"
+                    "Получает значение от других блоков через соединения.\n"
+                    "Отображается слева на блоке в виде входного пина.",
+            "output": "Выходной параметр блока.\n"
+                     "Передаёт вычисленное значение другим блокам.\n"
+                     "Отображается справа на блоке в виде выходного пина.",
+            "parameter": "Настраиваемый параметр блока.\n"
+                        "Пользователь может изменить его значение в свойствах блока.\n"
+                        "Имеет значение по умолчанию, которое можно переопределить."
+        }
+
+        def update_description():
+            description_text.setText(role_descriptions.get(role_combo.currentText(), ""))
+
+        role_combo.currentTextChanged.connect(update_description)
+        update_description()
+
+        description_layout.addWidget(description_text)
+        description_group.setLayout(description_layout)
+        layout.addWidget(description_group)
+
+        buttons_layout = QtWidgets.QHBoxLayout()
+        btn_save = QtWidgets.QPushButton("Сохранить")
+        btn_save.setStyleSheet("background-color: #4CAF50; color: white; padding: 5px 15px;")
+        btn_cancel = QtWidgets.QPushButton("Отмена")
+        btn_cancel.setStyleSheet("padding: 5px 15px;")
+        buttons_layout.addStretch()
+        buttons_layout.addWidget(btn_cancel)
+        buttons_layout.addWidget(btn_save)
+        layout.addLayout(buttons_layout)
+
+        def save_changes():
+            new_role = role_combo.currentText()
+            new_alias = alias_edit.text().strip()
+            new_default = default_edit.text().strip()
+
+            if not new_alias:
+                QtWidgets.QMessageBox.warning(dialog, "Ошибка", "Псевдоним не может быть пустым!")
+                return
+
+            if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', new_alias):
+                QtWidgets.QMessageBox.warning(
+                    dialog, "Ошибка",
+                    "Псевдоним должен начинаться с буквы или подчёркивания\n"
+                    "и содержать только буквы, цифры и подчёркивания!"
+                )
+                return
+
+            self.variables[var_name]['role'] = new_role
+            self.variables[var_name]['alias'] = new_alias
+            self.variables[var_name]['default'] = new_default if new_default else None
+
+            item.setText(2, new_role)
+            item.setText(3, new_alias)
+            item.setText(4, new_default)
+
+            dialog.accept()
+
+        def cancel_changes():
+            dialog.reject()
+
+        btn_save.clicked.connect(save_changes)
+        btn_cancel.clicked.connect(cancel_changes)
+
+        dialog.setLayout(layout)
+        dialog.exec_()
+
+    def generate_block(self):
+        """Генерирует .ubi файл."""
+        log.debug("generate_block: start")
+        try:
+            code = self.code_input.toPlainText()
+            setup_code = extract_function_body(code, 'setup')
+            loop_code = extract_function_body(code, 'loop')
+
+            for var_name, var_info in self.variables.items():
+                if var_info['alias'] != var_name:
+                    loop_code = re.sub(r'\b' + var_name + r'\b', var_info['alias'], loop_code)
+                    setup_code = re.sub(r'\b' + var_name + r'\b', var_info['alias'], setup_code)
+
+            block_name = self.block_name_entry.text()
+            block_description = self.block_description_entry.toPlainText().strip() or "Автоматически сгенерированный блок"
+
+            xml_content = create_ubi_xml_sixx(
+                block_name=block_name,
+                block_description=block_description,
+                variables=self.variables,
+                functions=self.functions,
+                global_includes=self.global_includes,
+                defines=self.defines,
+                extra_declarations=self.extra_declarations,
+                static_declarations=self.static_declarations,
+                setup_code=setup_code,
+                loop_code=loop_code,
+                enable_input=self.enable_input_checkbox.isChecked(),
+            )
+
+            if (self.last_save_dir and os.path.exists(self.last_save_dir) and
+                    "system32" not in os.path.normpath(self.last_save_dir).lower()):
+                save_dir = self.last_save_dir
+            else:
+                try:
+                    save_dir = os.path.join(os.path.expanduser("~"), "Desktop")
+                    if not os.path.exists(save_dir):
+                        save_dir = os.path.join(os.path.expanduser("~"), "Рабочий стол")
+                    if not os.path.exists(save_dir):
+                        save_dir = os.path.expanduser("~")
+                except Exception:
+                    save_dir = os.path.expanduser("~")
+
+            default_filename = os.path.join(save_dir, "{}.ubi".format(block_name))
+            log.debug("generate_block: opening save dialog default=%s", default_filename)
+            filename, selected_filter = QtWidgets.QFileDialog.getSaveFileName(
+                self, "Сохранить блок", default_filename,
+                "FLProg Block (*.ubi);;All files (*.*)",
+                options=QtWidgets.QFileDialog.DontUseNativeDialog
+            )
+            log.debug("generate_block: save dialog returned filename=%s", filename)
+            if filename:
+                if not filename.endswith('.ubi'):
+                    filename += '.ubi'
+
+                with open(filename, 'w', encoding='utf-16') as f:
+                    f.write(xml_content)
+
+                new_dir = os.path.dirname(filename)
+                if new_dir and "system32" not in new_dir.lower():
+                    self.last_save_dir = new_dir
+
+                log.info("generate_block: saved %s", filename)
+                QtWidgets.QMessageBox.information(
+                    self, "Успех",
+                    "Блок успешно сохранен в формате SIXX:\n{}".format(filename)
+                )
+
+        except Exception as e:
+            log.exception("generate_block: error %s", e)
+            error_msg = "Ошибка при сохранении:\n{}\n\nПодробности:\n{}".format(str(e), traceback.format_exc())
+            QtWidgets.QMessageBox.critical(self, "Ошибка", error_msg)
+
+    def generate_block_to_file(self, filename):
+        """CLI-версия: сохраняет .ubi без диалогов."""
+        try:
+            code = self.code_input.toPlainText()
+            setup_code = extract_function_body(code, 'setup')
+            loop_code = extract_function_body(code, 'loop')
+
+            for var_name, var_info in self.variables.items():
+                if var_info['alias'] != var_name:
+                    loop_code = re.sub(r'\b' + var_name + r'\b', var_info['alias'], loop_code)
+                    setup_code = re.sub(r'\b' + var_name + r'\b', var_info['alias'], setup_code)
+
+            block_name = self.block_name_entry.text()
+            block_description = self.block_description_entry.toPlainText().strip() or "Автоматически сгенерированный блок"
+
+            xml_content = create_ubi_xml_sixx(
+                block_name=block_name,
+                block_description=block_description,
+                variables=self.variables,
+                functions=self.functions,
+                global_includes=self.global_includes,
+                defines=self.defines,
+                extra_declarations=self.extra_declarations,
+                static_declarations=self.static_declarations,
+                setup_code=setup_code,
+                loop_code=loop_code,
+                enable_input=self.enable_input_checkbox.isChecked(),
+            )
+
+            if not filename.endswith('.ubi'):
+                filename += '.ubi'
+
+            with open(filename, 'w', encoding='utf-16') as f:
+                f.write(xml_content)
+
+            return True, filename
+        except Exception as e:
+            return False, "Ошибка при сохранении:\n{}\n\nПодробности:\n{}".format(str(e), traceback.format_exc())
