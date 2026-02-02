@@ -14,6 +14,12 @@ PRIMITIVE_TYPES = {
     'byte', 'char', 'String', 'uint8_t', 'int16_t', 'uint16_t', 'int32_t', 'uint32_t'
 }
 
+# Порядок типов для выбора типа define в GUI (все типы переменных Arduino)
+DEFINE_TYPE_CHOICES = [
+    'int', 'long', 'unsigned long', 'float',
+    'byte', 'char', 'String', 'bool', 'boolean',
+]
+
 # Маппинг типов Arduino на SIXX-типы FLProg
 TYPE_MAPPING = {
     'int': 'IntegerDataType',

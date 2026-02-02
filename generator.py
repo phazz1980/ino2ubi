@@ -38,15 +38,16 @@ def create_ubi_xml_sixx(
     variables: dict,
     functions: dict,
     global_includes: list,
-    global_defines: dict,
+    defines: list,
     extra_declarations: list,
     setup_code: str,
     loop_code: str,
     enable_input: bool = False,
-    parameter_defines: list | None = None,
-    global_defines_use_as_param: set | list | None = None
 ) -> str:
     """Создаёт SIXX XML для FLProg блока."""
+    # Убираем пробелы в конце строк кода
+    setup_code = '\n'.join(line.rstrip() for line in setup_code.splitlines())
+    loop_code = '\n'.join(line.rstrip() for line in loop_code.splitlines())
     if enable_input:
         loop_code = "if(En)\n{\n" + loop_code + "\n}"
     loop_code_encoded = html.escape(loop_code)
@@ -69,8 +70,12 @@ def create_ubi_xml_sixx(
     instance_coll_id = 15
     comment_str_id = 18
 
+    # Порядок входов/выходов/параметров — как в коде (по position)
+    _code_order_pos = lambda v: v.get('position', 999999999)
+
     inputs_xml = ""
     inputs_list = [(var_name, var_info) for var_name, var_info in variables.items() if var_info['role'] == 'input']
+    inputs_list.sort(key=lambda x: _code_order_pos(x[1]))
 
     if enable_input:
         en_adaptor_id = next_id()
@@ -121,6 +126,7 @@ def create_ubi_xml_sixx(
     outputs_coll_id = next_id()
     outputs_xml = ""
     outputs_list = [(var_name, var_info) for var_name, var_info in variables.items() if var_info['role'] == 'output']
+    outputs_list.sort(key=lambda x: _code_order_pos(x[1]))
 
     id_base = 153438280
     for idx, (var_name, var_info) in enumerate(outputs_list):
@@ -157,22 +163,25 @@ def create_ubi_xml_sixx(
 
     params_coll_id = next_id()
     params_xml = ""
-    params_list = [(var_name, var_info) for var_name, var_info in variables.items() if var_info['role'] == 'parameter']
-    if parameter_defines:
-        for pd in parameter_defines:
-            params_list.append((pd['name'], {
-                'type': 'String',
-                'alias': pd['name'],
-                'default': pd.get('value', ''),
+    # Параметры: переменные + #define с role=parameter, в порядке появления в коде
+    params_list = []
+    for var_name, var_info in variables.items():
+        if var_info['role'] == 'parameter':
+            params_list.append((_code_order_pos(var_info), var_name, var_info))
+    for d in (defines or []):
+        if d.get('role') == 'parameter':
+            default_val_define = d.get('value')
+            if default_val_define is None:
+                default_val_define = ''
+            else:
+                default_val_define = str(default_val_define)
+            params_list.append((d.get('position', 999999999), d['name'], {
+                'type': d.get('type', 'String'),
+                'alias': d['name'],
+                'default': default_val_define,
             }))
-    use_as_param = global_defines_use_as_param or set()
-    for name in use_as_param:
-        if name in global_defines:
-            params_list.append((name, {
-                'type': 'String',
-                'alias': name,
-                'default': global_defines[name],
-            }))
+    params_list.sort(key=lambda x: x[0])
+    params_list = [(name, info) for _, name, info in params_list]
 
     for var_name, var_info in params_list:
         adaptor_id = next_id()
@@ -186,19 +195,26 @@ def create_ubi_xml_sixx(
         param_uuid = str(uuid.uuid4())
         adapt_uuid = str(uuid.uuid4())
 
-        default_val = var_info.get('default', '0') or '0'
+        if var_info['type'] == 'String':
+            default_val = var_info.get('default', '') or ''
+        else:
+            default_val = var_info.get('default', '0') or '0'
+
+        param_type = var_info['type']
+        if param_type in ('bool', 'boolean'):
+            default_val = '1' if str(default_val).strip().lower() in ('true', '1') else '0'
 
         params_xml += '\t\t\t\t<sixx.object sixx.id="{}" sixx.type="InputsOutputsAdaptorForUserBlock" sixx.env="Arduino" >\n'.format(adaptor_id)
         params_xml += '\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="object" sixx.type="UserBlockParametr" sixx.env="Arduino" >\n'.format(param_id)
         params_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="name" sixx.type="String" sixx.env="Core" >{}</sixx.object>\n'.format(param_name_id, var_info["alias"])
-        params_xml += create_sixx_data_type(var_info['type'], param_type_id, instance_coll_id, next_id)
+        params_xml += create_sixx_data_type(param_type, param_type_id, instance_coll_id, next_id)
         params_xml += '\t\t\t\t\t\t<sixx.object sixx.name="hasDefaultValue" sixx.type="True" sixx.env="Core" />\n'
 
-        if var_info['type'] == 'String':
-            params_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="numberDefaultValue" sixx.type="String" sixx.env="Core" >{}</sixx.object>\n'.format(default_val_id, html.escape(default_val))
+        if param_type == 'String':
+            params_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="stringDefaultValue" sixx.type="String" sixx.env="Core" >{}</sixx.object>\n'.format(default_val_id, html.escape(default_val))
         else:
             try:
-                if '.' in default_val:
+                if param_type in ('float', 'double'):
                     params_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="numberDefaultValue" sixx.type="Float" sixx.env="Core" >{}</sixx.object>\n'.format(default_val_id, default_val)
                 else:
                     params_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="numberDefaultValue" sixx.type="SmallInteger" sixx.env="Core" >{}</sixx.object>\n'.format(default_val_id, default_val)
@@ -230,33 +246,25 @@ def create_ubi_xml_sixx(
         decl_last_id = next_id()
         decl_first_id = next_id()
 
-        line = inc.strip()
+        line = (inc or '').strip().rstrip()
         declare_xml += '\t\t\t\t\t<sixx.object sixx.id="{}" sixx.type="CodeUserBlockDeclareStandartBlock" sixx.env="Arduino" >\n'.format(decl_id)
         declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="name" sixx.type="String" sixx.env="Core" ></sixx.object>\n'.format(decl_name_id)
         declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="lastPart" sixx.type="String" sixx.env="Core" ></sixx.object>\n'.format(decl_last_id)
         declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="firstPart" sixx.type="String" sixx.env="Core" >{}</sixx.object>\n'.format(decl_first_id, html.escape(line))
         declare_xml += '\t\t\t\t\t</sixx.object>\n'
 
-    for name, value in global_defines.items():
+    for d in (defines or []):
+        if d.get('role') == 'parameter':
+            continue
         decl_id = next_id()
         decl_name_id = next_id()
         decl_last_id = next_id()
         decl_first_id = next_id()
 
-        line = "#define {} {}".format(name, value)
-        declare_xml += '\t\t\t\t\t<sixx.object sixx.id="{}" sixx.type="CodeUserBlockDeclareStandartBlock" sixx.env="Arduino" >\n'.format(decl_id)
-        declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="name" sixx.type="String" sixx.env="Core" ></sixx.object>\n'.format(decl_name_id)
-        declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="lastPart" sixx.type="String" sixx.env="Core" ></sixx.object>\n'.format(decl_last_id)
-        declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="firstPart" sixx.type="String" sixx.env="Core" >{}</sixx.object>\n'.format(decl_first_id, html.escape(line))
-        declare_xml += '\t\t\t\t\t</sixx.object>\n'
-
-    for pd in (parameter_defines or []):
-        decl_id = next_id()
-        decl_name_id = next_id()
-        decl_last_id = next_id()
-        decl_first_id = next_id()
-
-        line = "#define {} {}".format(pd['name'], pd.get('value', ''))
+        line = "#define {} {}".format(
+            str(d.get('name', '')).strip().rstrip(),
+            str(d.get('value', '')).strip().rstrip()
+        ).rstrip()
         declare_xml += '\t\t\t\t\t<sixx.object sixx.id="{}" sixx.type="CodeUserBlockDeclareStandartBlock" sixx.env="Arduino" >\n'.format(decl_id)
         declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="name" sixx.type="String" sixx.env="Core" ></sixx.object>\n'.format(decl_name_id)
         declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="lastPart" sixx.type="String" sixx.env="Core" ></sixx.object>\n'.format(decl_last_id)
@@ -268,6 +276,7 @@ def create_ubi_xml_sixx(
         decl_name_id = next_id()
         decl_last_id = next_id()
         decl_first_id = next_id()
+        line = (line or '').strip().rstrip()
 
         declare_xml += '\t\t\t\t\t<sixx.object sixx.id="{}" sixx.type="CodeUserBlockDeclareStandartBlock" sixx.env="Arduino" >\n'.format(decl_id)
         declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="name" sixx.type="String" sixx.env="Core" ></sixx.object>\n'.format(decl_name_id)
@@ -283,14 +292,14 @@ def create_ubi_xml_sixx(
 
         default_val = var_info.get('default')
         if default_val:
-            last_part = " = {};".format(html.escape(default_val.strip()))
+            last_part = " = {};".format(html.escape(str(default_val).strip().rstrip()))
         else:
             last_part = ";"
 
         declare_xml += '\t\t\t\t\t<sixx.object sixx.id="{}" sixx.type="CodeUserBlockDeclareStandartBlock" sixx.env="Arduino" >\n'.format(decl_id)
-        declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="name" sixx.type="String" sixx.env="Core" >{}</sixx.object>\n'.format(decl_name_id, var_info["alias"])
+        declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="name" sixx.type="String" sixx.env="Core" >{}</sixx.object>\n'.format(decl_name_id, (var_info.get("alias") or "").strip().rstrip())
         declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="lastPart" sixx.type="String" sixx.env="Core" >{}</sixx.object>\n'.format(decl_last_id, last_part)
-        declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="firstPart" sixx.type="String" sixx.env="Core" >{}</sixx.object>\n'.format(decl_first_id, var_info["type"])
+        declare_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="firstPart" sixx.type="String" sixx.env="Core" >{}</sixx.object>\n'.format(decl_first_id, (var_info.get("type") or "").strip().rstrip())
         declare_xml += '\t\t\t\t\t</sixx.object>\n'
 
     func_part_id = next_id()
@@ -305,7 +314,7 @@ def create_ubi_xml_sixx(
         func_name_id = next_id()
         func_params_coll_id = next_id()
 
-        body_encoded = html.escape(func_info['body'])
+        body_encoded = html.escape('\n'.join(line.rstrip() for line in func_info['body'].splitlines()))
 
         functions_xml += '\t\t\t\t\t<sixx.object sixx.id="{}" sixx.type="CodeUserBlockFunction" sixx.env="Arduino" >\n'.format(func_id)
         functions_xml += '\t\t\t\t\t\t<sixx.object sixx.id="{}" sixx.name="functionBody" sixx.type="String" sixx.env="Core" >{}</sixx.object>\n'.format(func_body_id, body_encoded)

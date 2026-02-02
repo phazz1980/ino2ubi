@@ -4,7 +4,7 @@
 
 import re
 
-from constants import PRIMITIVE_TYPES
+from constants import PRIMITIVE_TYPES, DEFINE_TYPE_CHOICES
 
 
 def extract_function_body(code: str, func_name: str) -> str:
@@ -153,10 +153,11 @@ def parse_functions(code: str) -> dict:
 def parse_global_section(
     global_section: str,
     functions: dict
-) -> tuple[dict, list, dict, list]:
+) -> tuple[dict, list, list, list]:
     """
     Парсит глобальную секцию кода.
-    Возвращает: (variables, global_includes, global_defines, extra_declarations, parameter_defines)
+    Возвращает: (variables, global_includes, defines, extra_declarations)
+    defines — список словарей {name, value, role} с ролями "global" | "parameter".
     """
     # Убираем функции, определённые до setup/loop
     section = global_section
@@ -169,22 +170,46 @@ def parse_global_section(
     include_pattern = r'^\s*#include[^\n]*$'
     global_includes = re.findall(include_pattern, section, re.MULTILINE)
 
-    global_defines = {}
-    parameter_defines = []
+    def infer_define_type(value: str) -> str:
+        """Определяет тип define по значению: кавычки -> String, true/false -> boolean, с запятой/точкой -> float, число -> long."""
+        if not value:
+            return 'String'
+        s = value.strip()
+        if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
+            return 'String'
+        if s.lower() in ('true', 'false'):
+            return 'boolean'
+        if ',' in s or '.' in s:
+            try:
+                float(s.replace(',', '.', 1))
+                return 'float'
+            except ValueError:
+                pass
+        try:
+            int(s)
+            return 'long'
+        except ValueError:
+            pass
+        return 'String'
+
+    # #define обрабатываются как переменные с двумя ролями: global и parameter; value — значение по умолчанию
+    defines = []
+    line_offset = 0
     for line in section.split('\n'):
         stripped = line.strip()
         if not stripped.startswith('#define'):
+            line_offset += len(line) + 1
             continue
-        m = re.match(r'#define\s+([A-Za-z_][A-Za-z0-9_]*)\s+(.*)$', stripped)
+        m = re.match(r'#define\s+([A-Za-z_][A-Za-z0-9_]*)\s*(.*)$', stripped)
         if not m:
+            line_offset += len(line) + 1
             continue
-        name, rest = m.group(1), m.group(2)
-        is_par = bool(re.search(r'//\s*par\b', rest))
-        value = rest.split('//')[0].strip() if '//' in rest else rest.strip()
-        if is_par:
-            parameter_defines.append({'name': name, 'value': value})
-        else:
-            global_defines[name] = value
+        name, rest = m.group(1), m.group(2).strip()
+        role = 'parameter' if re.search(r'//\s*par\b', rest) else 'global'
+        value = rest.split('//')[0].strip() if '//' in rest else rest
+        define_type = infer_define_type(value)
+        defines.append({'name': name, 'value': value, 'role': role, 'type': define_type, 'position': line_offset})
+        line_offset += len(line) + 1
 
     # Парсим глобальные переменные (поддержка множественных деклараций через запятую)
     variables = {}
@@ -397,7 +422,8 @@ def parse_global_section(
                     'type': var_type,
                     'default': value_part,
                     'role': role,
-                    'alias': var_name
+                    'alias': var_name,
+                    'position': start_idx
                 }
             continue
 
@@ -405,7 +431,7 @@ def parse_global_section(
         if re.match(r'^[A-Za-z_][A-Za-z0-9_:<>]*\s+.+$', stmt, re.DOTALL):
             extra_declarations.append(stmt + ';')
 
-    return variables, global_includes, global_defines, extra_declarations, parameter_defines
+    return variables, global_includes, defines, extra_declarations
 
 
 def parse_arduino_code(code: str) -> dict:
@@ -417,14 +443,14 @@ def parse_arduino_code(code: str) -> dict:
     - functions: dict
     - global_section_raw: str
     - global_includes: list
-    - global_defines: dict
+    - defines: list[{name, value, role}] — #define как переменные с ролями global | parameter
     - extra_declarations: list
     """
     leading_comment = extract_leading_comment(code)
     functions = parse_functions(code)
     global_section_raw = extract_global_section(code)
 
-    variables, global_includes, global_defines, extra_declarations, parameter_defines = parse_global_section(
+    variables, global_includes, defines, extra_declarations = parse_global_section(
         global_section_raw, functions
     )
 
@@ -434,7 +460,6 @@ def parse_arduino_code(code: str) -> dict:
         'functions': functions,
         'global_section_raw': global_section_raw,
         'global_includes': global_includes,
-        'global_defines': global_defines,
+        'defines': defines,
         'extra_declarations': extra_declarations,
-        'parameter_defines': parameter_defines,
     }

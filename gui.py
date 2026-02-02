@@ -14,7 +14,7 @@ import urllib.request
 
 from PyQt5 import QtWidgets, QtCore, QtGui
 
-from constants import VERSION, GITHUB_REPO
+from constants import VERSION, GITHUB_REPO, DEFINE_TYPE_CHOICES
 
 log = logging.getLogger(__name__)
 from parser import parse_arduino_code, extract_function_body
@@ -108,9 +108,7 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
         self.functions = {}
         self.global_section_raw = ""
         self.global_includes = []
-        self.global_defines = {}
-        self.parameter_defines = []
-        self.global_defines_use_as_param = set()  # имена глобальных #define, используемых как параметры блока
+        self.defines = []  # список {name, value, role}: #define как переменные с ролями global | parameter
         self.extra_declarations = []
         self._safe_home = self._get_safe_home_dir()
         app_dir = self._app_dir()
@@ -450,9 +448,7 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
         self.functions = {}
         self.global_section_raw = ""
         self.global_includes = []
-        self.global_defines = {}
-        self.parameter_defines = []
-        self.global_defines_use_as_param = set()
+        self.defines = []
         self.extra_declarations = []
 
         result = parse_arduino_code(code)
@@ -465,8 +461,7 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
         self.functions = result['functions']
         self.global_section_raw = result['global_section_raw']
         self.global_includes = result['global_includes']
-        self.global_defines = result['global_defines']
-        self.parameter_defines = result.get('parameter_defines', [])
+        self.defines = result.get('defines', [])
         self.extra_declarations = result['extra_declarations']
 
         for func_name, func_info in self.functions.items():
@@ -482,32 +477,25 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
             ])
             self.var_tree.addTopLevelItem(item)
 
-        for pd in self.parameter_defines:
-            name = pd.get('name', '')
-            value = pd.get('value', '')
+        for d in self.defines:
+            name = d.get('name', '')
+            value = d.get('value', '')
+            role = d.get('role', 'global')
+            define_type = d.get('type', 'String')
             item = QtWidgets.QTreeWidgetItem([
-                name, "define", "parameter", name, value
+                name, define_type, role, name, value
             ])
             item.setData(0, QtCore.Qt.UserRole, "define")
-            self.var_tree.addTopLevelItem(item)
-
-        for name, value in self.global_defines.items():
-            role = "parameter" if name in self.global_defines_use_as_param else "global"
-            item = QtWidgets.QTreeWidgetItem([
-                name, "define", role, name, value
-            ])
-            item.setData(0, QtCore.Qt.UserRole, "global_define")
             self.var_tree.addTopLevelItem(item)
 
         QtWidgets.QMessageBox.information(
             self,
             "Парсинг",
-            "Найдено глобальных переменных: {}\nНайдено функций: {}\nНайдено #include: {}\nНайдено #define: {}\n#define в параметрах: {}".format(
+            "Найдено глобальных переменных: {}\nНайдено функций: {}\nНайдено #include: {}\nНайдено #define: {}".format(
                 len(self.variables),
                 len(self.functions),
                 len(self.global_includes),
-                len(self.global_defines),
-                len(self.parameter_defines),
+                len(self.defines),
             ),
         )
 
@@ -543,97 +531,46 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
         dialog.setLayout(layout)
         dialog.exec_()
 
-    def _edit_global_define(self, item, define_name):
-        """Открывает диалог редактирования глобального #define."""
-        if define_name not in self.global_defines:
+    def _edit_define(self, item, define_index):
+        """Открывает диалог редактирования #define (роль, тип, значение по умолчанию)."""
+        if define_index < 0 or define_index >= len(self.defines):
             return
-        old_value = self.global_defines[define_name]
+        d = self.defines[define_index]
 
         dialog = QtWidgets.QDialog(self)
-        dialog.setWindowTitle("Редактировать #define: {}".format(define_name))
-        dialog.resize(450, 200)
+        dialog.setWindowTitle("Редактировать #define: {}".format(d.get('name', '')))
+        dialog.resize(450, 260)
 
         layout = QtWidgets.QFormLayout()
 
-        name_edit = QtWidgets.QLineEdit(define_name)
-        name_edit.setPlaceholderText("Имя макроса")
-        name_edit.setToolTip("Имя для #define (буквы, цифры, подчёркивание)")
-        layout.addRow("Имя (#define):", name_edit)
-
-        value_edit = QtWidgets.QLineEdit(old_value)
-        value_edit.setPlaceholderText("Значение")
-        value_edit.setToolTip("Значение макроса")
-        layout.addRow("Значение:", value_edit)
-
-        use_in_params_check = QtWidgets.QCheckBox("Использовать в параметрах блока")
-        use_in_params_check.setChecked(define_name in self.global_defines_use_as_param)
-        use_in_params_check.setToolTip("Если включено, этот #define станет настраиваемым параметром блока в FLProg")
-        layout.addRow("", use_in_params_check)
-
-        buttons_layout = QtWidgets.QHBoxLayout()
-        btn_save = QtWidgets.QPushButton("Сохранить")
-        btn_save.setStyleSheet("background-color: #4CAF50; color: white; padding: 5px 15px;")
-        btn_cancel = QtWidgets.QPushButton("Отмена")
-        btn_cancel.setStyleSheet("padding: 5px 15px;")
-        buttons_layout.addStretch()
-        buttons_layout.addWidget(btn_cancel)
-        buttons_layout.addWidget(btn_save)
-        btn_row = QtWidgets.QWidget()
-        btn_row.setLayout(buttons_layout)
-        layout.addRow(btn_row)
-
-        def save_changes():
-            new_name = name_edit.text().strip()
-            new_value = value_edit.text().strip()
-            if not new_name:
-                QtWidgets.QMessageBox.warning(dialog, "Ошибка", "Имя не может быть пустым!")
-                return
-            if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', new_name):
-                QtWidgets.QMessageBox.warning(
-                    dialog, "Ошибка",
-                    "Имя должно начинаться с буквы или подчёркивания\n"
-                    "и содержать только буквы, цифры и подчёркивания!"
-                )
-                return
-            self.global_defines_use_as_param.discard(define_name)
-            if use_in_params_check.isChecked():
-                self.global_defines_use_as_param.add(new_name)
-            del self.global_defines[define_name]
-            self.global_defines[new_name] = new_value
-            item.setText(0, new_name)
-            item.setText(2, "parameter" if use_in_params_check.isChecked() else "global")
-            item.setText(3, new_name)
-            item.setText(4, new_value)
-            dialog.accept()
-
-        btn_save.clicked.connect(save_changes)
-        btn_cancel.clicked.connect(dialog.reject)
-
-        dialog.setLayout(layout)
-        dialog.exec_()
-
-    def _edit_parameter_define(self, item, define_name):
-        """Открывает диалог редактирования #define параметра."""
-        pd_index = next((i for i, pd in enumerate(self.parameter_defines) if pd.get('name') == define_name), None)
-        if pd_index is None:
-            return
-        pd = self.parameter_defines[pd_index]
-
-        dialog = QtWidgets.QDialog(self)
-        dialog.setWindowTitle("Редактировать #define параметр: {}".format(define_name))
-        dialog.resize(450, 200)
-
-        layout = QtWidgets.QFormLayout()
-
-        name_edit = QtWidgets.QLineEdit(pd.get('name', ''))
+        name_edit = QtWidgets.QLineEdit(d.get('name', ''))
         name_edit.setPlaceholderText("Имя макроса (например MY_PIN)")
         name_edit.setToolTip("Имя для #define (буквы, цифры, подчёркивание)")
         layout.addRow("Имя (#define):", name_edit)
 
-        value_edit = QtWidgets.QLineEdit(pd.get('value', ''))
-        value_edit.setPlaceholderText("Значение (например 13)")
-        value_edit.setToolTip("Значение макроса")
-        layout.addRow("Значение:", value_edit)
+        value_edit = QtWidgets.QLineEdit(d.get('value', ''))
+        value_edit.setPlaceholderText("Значение по умолчанию (например 13)")
+        value_edit.setToolTip("Значение макроса по умолчанию")
+        layout.addRow("Значение по умолчанию:", value_edit)
+
+        type_combo = QtWidgets.QComboBox()
+        type_combo.addItems(DEFINE_TYPE_CHOICES)
+        current_type = d.get('type', 'String')
+        if current_type in DEFINE_TYPE_CHOICES:
+            type_combo.setCurrentText(current_type)
+        else:
+            type_combo.setCurrentText('String')
+        type_combo.setToolTip("Тип переменной Arduino (int, long, float, String, bool и др.)")
+        layout.addRow("Тип:", type_combo)
+
+        role_combo = QtWidgets.QComboBox()
+        role_combo.addItems(["global", "parameter"])
+        role_combo.setCurrentText(d.get('role', 'global'))
+        role_combo.setToolTip(
+            "global — константа в коде блока\n"
+            "parameter — настраиваемый параметр блока в FLProg"
+        )
+        layout.addRow("Роль:", role_combo)
 
         buttons_layout = QtWidgets.QHBoxLayout()
         btn_save = QtWidgets.QPushButton("Сохранить")
@@ -650,6 +587,8 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
         def save_changes():
             new_name = name_edit.text().strip()
             new_value = value_edit.text().strip()
+            new_type = type_combo.currentText()
+            new_role = role_combo.currentText()
             if not new_name:
                 QtWidgets.QMessageBox.warning(dialog, "Ошибка", "Имя не может быть пустым!")
                 return
@@ -660,8 +599,10 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
                     "и содержать только буквы, цифры и подчёркивания!"
                 )
                 return
-            self.parameter_defines[pd_index] = {'name': new_name, 'value': new_value}
+            self.defines[define_index] = {'name': new_name, 'value': new_value, 'role': new_role, 'type': new_type}
             item.setText(0, new_name)
+            item.setText(1, new_type)
+            item.setText(2, new_role)
             item.setText(3, new_name)
             item.setText(4, new_value)
             dialog.accept()
@@ -673,15 +614,12 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
         dialog.exec_()
 
     def on_tree_double_click(self, item, column):
-        """Открывает диалог редактирования переменной или #define параметра."""
+        """Открывает диалог редактирования переменной или #define."""
         var_name = item.text(0)
 
         if item.data(0, QtCore.Qt.UserRole) == "define":
-            self._edit_parameter_define(item, var_name)
-            return
-
-        if item.data(0, QtCore.Qt.UserRole) == "global_define":
-            self._edit_global_define(item, var_name)
+            define_index = next((i for i, d in enumerate(self.defines) if d.get('name') == var_name), -1)
+            self._edit_define(item, define_index)
             return
 
         if var_name not in self.variables:
@@ -832,13 +770,11 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
                 variables=self.variables,
                 functions=self.functions,
                 global_includes=self.global_includes,
-                global_defines=self.global_defines,
+                defines=self.defines,
                 extra_declarations=self.extra_declarations,
                 setup_code=setup_code,
                 loop_code=loop_code,
                 enable_input=self.enable_input_checkbox.isChecked(),
-                parameter_defines=self.parameter_defines,
-                global_defines_use_as_param=self.global_defines_use_as_param
             )
 
             if (self.last_save_dir and os.path.exists(self.last_save_dir) and
@@ -905,13 +841,11 @@ class ArduinoToFLProgConverter(QtWidgets.QMainWindow):
                 variables=self.variables,
                 functions=self.functions,
                 global_includes=self.global_includes,
-                global_defines=self.global_defines,
+                defines=self.defines,
                 extra_declarations=self.extra_declarations,
                 setup_code=setup_code,
                 loop_code=loop_code,
                 enable_input=self.enable_input_checkbox.isChecked(),
-                parameter_defines=self.parameter_defines,
-                global_defines_use_as_param=self.global_defines_use_as_param
             )
 
             if not filename.endswith('.ubi'):
