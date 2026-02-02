@@ -434,3 +434,25 @@
 2026-02-02 22:37:56,074 DEBUG [gui] generate_block: opening save dialog default=C:\Users\fotne\YandexDisk\Flprog\newWork\sketch_jan13a.ubi
 2026-02-02 22:37:59,432 DEBUG [gui] generate_block: save dialog returned filename=C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ubi
 2026-02-02 22:37:59,434 INFO [gui] generate_block: saved C:/Users/fotne/YandexDisk/Flprog/newWork/sketch_jan13a.ubi
+2026-02-02 22:42:42,099 INFO [gui] _start_update_check: silent=False
+2026-02-02 22:42:42,111 DEBUG [gui] _start_update_check: progress shown, starting thread
+2026-02-02 22:42:42,112 DEBUG [gui] UpdateCheckerWorker.run: start
+2026-02-02 22:42:42,532 DEBUG [gui] UpdateCheckerWorker.run: has_update=True latest=1.7
+2026-02-02 22:42:42,532 INFO [gui] update_check on_finished: has_update=True latest_ver=1.7
+2026-02-02 23:02:18,765 INFO [__main__] main_cli: start, input=None
+2026-02-02 23:02:18,766 DEBUG [__main__] main_cli: GUI mode
+2026-02-02 23:02:18,773 DEBUG [__main__] main_cli: creating window
+2026-02-02 23:02:18,773 DEBUG [gui] ArduinoToFLProgConverter.__init__: start
+2026-02-02 23:02:18,790 DEBUG [gui] ArduinoToFLProgConverter.__init__: create_widgets
+2026-02-02 23:02:19,097 DEBUG [gui] ArduinoToFLProgConverter.__init__: done, frozen=True
+2026-02-02 23:02:19,097 DEBUG [__main__] main_cli: showing window, entering event loop
+2026-02-02 23:02:19,152 INFO [gui] _start_update_check: silent=True
+2026-02-02 23:02:19,193 DEBUG [gui] _start_update_check: progress shown, starting thread
+2026-02-02 23:02:19,193 DEBUG [gui] UpdateCheckerWorker.run: start
+2026-02-02 23:02:19,490 DEBUG [gui] UpdateCheckerWorker.run: no update latest=1.7
+2026-02-02 23:02:19,491 INFO [gui] update_check on_finished: has_update=False latest_ver=1.7
+2026-02-02 23:02:21,930 INFO [gui] _start_update_check: silent=False
+2026-02-02 23:02:21,945 DEBUG [gui] _start_update_check: progress shown, starting thread
+2026-02-02 23:02:21,945 DEBUG [gui] UpdateCheckerWorker.run: start
+2026-02-02 23:02:22,202 DEBUG [gui] UpdateCheckerWorker.run: no update latest=1.7
+2026-02-02 23:02:22,203 INFO [gui] update_check on_finished: has_update=False latest_ver=1.7

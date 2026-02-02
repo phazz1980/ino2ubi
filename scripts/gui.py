@@ -59,19 +59,29 @@ class UpdateCheckerWorker(QtCore.QObject):
                 self.error.emit("Не удалось получить версию из GitHub")
                 return
             if _parse_version(latest) > _parse_version(VERSION):
-                download_url = html_url
+                tag = data.get("tag_name", "").strip()
+
+                # 1. Пытаемся найти asset .zip
+                download_url = ""
                 for a in data.get("assets", []):
-                    name = a.get("name", "")
-                    if name.endswith(".zip"):
-                        download_url = a.get("browser_download_url", download_url)
+                    if a.get("name", "").lower().endswith(".zip"):
+                        download_url = a.get("browser_download_url", "")
                         break
-                else:
-                    for a in data.get("assets", []):
-                        if a.get("name", "").endswith(".exe"):
-                            download_url = a.get("browser_download_url", download_url)
-                            break
-                log.debug("UpdateCheckerWorker.run: has_update=True latest=%s", latest)
+
+                # 2. Если asset .zip нет — используем zip по тегу
+                if not download_url and tag:
+                    download_url = (
+                        "https://github.com/{}/archive/refs/tags/{}.zip"
+                        .format(GITHUB_REPO, tag)
+                    )
+
+                log.debug(
+                    "UpdateCheckerWorker.run: has_update=True latest=%s download_url=%s",
+                    latest, download_url
+                )
+
                 self.finished.emit(True, latest, download_url)
+
             else:
                 log.debug("UpdateCheckerWorker.run: no update latest=%s", latest)
                 self.finished.emit(False, latest, "")
